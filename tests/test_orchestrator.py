@@ -1,6 +1,7 @@
-"""Tests for auto_story.py — orchestrator core paths.
+"""Tests for orchestrator.py — orchestrator core paths.
 
 Tests functions in isolation with mocked subprocess/runner dependencies.
+All config access is via get_config() returning a Config instance.
 """
 
 import sys
@@ -11,69 +12,81 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from claude_sdlc.config import Config
 from claude_sdlc.orchestrator import (
     determine_resume_step,
     should_run_step,
     parse_review_findings,
     apply_safety_heuristic,
     generate_escalation_doc,
-    run_schema_drift_check,
     _scoped_clean,
 )
 from claude_sdlc.run_log import RunLog, StepLog, StepStatus
 
 
+def _default_config() -> Config:
+    """Return a default Config instance for testing."""
+    return Config()
+
+
 class TestDetermineResumeStep:
     def test_empty_steps(self):
+        config = _default_config()
         run_log = RunLog(story="1-1", started="2026-03-25T10:00:00")
-        assert determine_resume_step(run_log) == "create-story"
+        assert determine_resume_step(run_log, config.story.pipeline_steps) == "create-story"
 
     def test_last_step_paused(self):
+        config = _default_config()
         run_log = RunLog(story="1-1", started="2026-03-25T10:00:00")
         step = StepLog(step="code-review", mode={}, status=str(StepStatus.PAUSED))
         run_log.steps.append(step)
-        assert determine_resume_step(run_log) == "code-review"
+        assert determine_resume_step(run_log, config.story.pipeline_steps) == "code-review"
 
     def test_last_step_failed(self):
+        config = _default_config()
         run_log = RunLog(story="1-1", started="2026-03-25T10:00:00")
         step = StepLog(step="dev-story", mode={}, status=str(StepStatus.FAILED))
         run_log.steps.append(step)
-        assert determine_resume_step(run_log) == "dev-story"
+        assert determine_resume_step(run_log, config.story.pipeline_steps) == "dev-story"
 
     def test_last_step_completed_resumes_next(self):
+        config = _default_config()
         run_log = RunLog(story="1-1", started="2026-03-25T10:00:00")
         step = StepLog(step="dev-story", mode={}, status=str(StepStatus.COMPLETED))
         run_log.steps.append(step)
-        assert determine_resume_step(run_log) == "code-review"
+        assert determine_resume_step(run_log, config.story.pipeline_steps) == "code-review"
 
     def test_last_step_is_trace_completed(self):
+        config = _default_config()
         run_log = RunLog(story="1-1", started="2026-03-25T10:00:00")
         step = StepLog(step="trace", mode={}, status=str(StepStatus.COMPLETED))
         run_log.steps.append(step)
         # Past the end → defaults to trace
-        assert determine_resume_step(run_log) == "trace"
+        assert determine_resume_step(run_log, config.story.pipeline_steps) == "trace"
 
 
 class TestShouldRunStep:
     def test_normal_order(self):
-        assert should_run_step("create-story", "create-story", False) is True
-        assert should_run_step("dev-story", "create-story", False) is True
-        assert should_run_step("trace", "create-story", False) is True
+        steps = _default_config().story.pipeline_steps
+        assert should_run_step("create-story", "create-story", False, steps) is True
+        assert should_run_step("dev-story", "create-story", False, steps) is True
+        assert should_run_step("trace", "create-story", False, steps) is True
 
     def test_skip_flag(self):
-        assert should_run_step("create-story", "create-story", True) is False
+        steps = _default_config().story.pipeline_steps
+        assert should_run_step("create-story", "create-story", True, steps) is False
 
     def test_resume_skips_earlier_steps(self):
-        assert should_run_step("create-story", "code-review", False) is False
-        assert should_run_step("dev-story", "code-review", False) is False
-        assert should_run_step("code-review", "code-review", False) is True
-        assert should_run_step("trace", "code-review", False) is True
+        steps = _default_config().story.pipeline_steps
+        assert should_run_step("create-story", "code-review", False, steps) is False
+        assert should_run_step("dev-story", "code-review", False, steps) is False
+        assert should_run_step("code-review", "code-review", False, steps) is True
+        assert should_run_step("trace", "code-review", False, steps) is True
 
 
 class TestParseReviewFindings:
     def test_no_findings_file(self, tmp_path):
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", tmp_path):
-            result = parse_review_findings("9-9")
+        result = parse_review_findings("9-9", tmp_path)
         assert result == {"fix": [], "design": [], "note": []}
 
     def test_fix_findings(self, tmp_path):
@@ -82,8 +95,7 @@ class TestParseReviewFindings:
             "[FIX] Missing null check on `user.ts`\n"
             "The handler doesn't check for null.\n"
         )
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", tmp_path):
-            result = parse_review_findings("2-1")
+        result = parse_review_findings("2-1", tmp_path)
         assert len(result["fix"]) == 1
         assert "null check" in result["fix"][0]["summary"]
 
@@ -93,8 +105,7 @@ class TestParseReviewFindings:
             "[DESIGN] Token storage needs rethinking\n"
             "Options: `auth.ts` or `middleware.ts`\n"
         )
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", tmp_path):
-            result = parse_review_findings("2-1")
+        result = parse_review_findings("2-1", tmp_path)
         assert len(result["design"]) == 1
 
     def test_mixed_findings(self, tmp_path):
@@ -104,8 +115,7 @@ class TestParseReviewFindings:
             "[DESIGN] Architecture concern with `api.ts`\n\n"
             "[FIX] Unused import in `test.tsx`\n"
         )
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", tmp_path):
-            result = parse_review_findings("2-1")
+        result = parse_review_findings("2-1", tmp_path)
         assert len(result["fix"]) == 2
         assert len(result["design"]) == 1
 
@@ -116,8 +126,7 @@ class TestParseReviewFindings:
             "[NOTE] Consider adding loading state to submit button\n"
             "[NOTE] Minor style nit on `form.tsx`\n"
         )
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", tmp_path):
-            result = parse_review_findings("2-1")
+        result = parse_review_findings("2-1", tmp_path)
         assert len(result["note"]) == 2
         assert len(result["fix"]) == 0
         assert len(result["design"]) == 0
@@ -131,8 +140,7 @@ class TestParseReviewFindings:
             "[DESIGN] Architecture concern with `api.ts`\n\n"
             "[NOTE] Minor style suggestion\n"
         )
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", tmp_path):
-            result = parse_review_findings("2-1")
+        result = parse_review_findings("2-1", tmp_path)
         assert len(result["fix"]) == 1
         assert len(result["design"]) == 1
         assert len(result["note"]) == 1
@@ -156,8 +164,7 @@ class TestParseReviewFindings:
             "model: gpt-5.4\n"
             "session id: 019d5a6f-d559-73e2-bd81-b2b14939009c\n"
         )
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", tmp_path):
-            result = parse_review_findings("4-1")
+        result = parse_review_findings("4-1", tmp_path)
         assert len(result["fix"]) == 2
         assert "Skip hop flow" in result["fix"][0]["summary"]
         assert "Preserve the generated review prompt" in result["fix"][1]["summary"]
@@ -177,8 +184,7 @@ class TestParseReviewFindings:
             "- [P1] Skip hop flow — /home/user/project/src/page.tsx:10-12\n"
             "  Description of the issue.\n"
         )
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", tmp_path):
-            result = parse_review_findings("2-1")
+        result = parse_review_findings("2-1", tmp_path)
         assert len(result["fix"]) == 2
         assert "null check" in result["fix"][0]["summary"]
         assert "Skip hop flow" in result["fix"][1]["summary"]
@@ -202,22 +208,23 @@ class TestParseReviewFindings:
             "diff --git a/file.ts b/file.ts\n"
             "index abc..def 100644\n"
         )
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", tmp_path):
-            result = parse_review_findings("4-2")
+        result = parse_review_findings("4-2", tmp_path)
         assert result == {"fix": [], "design": [], "note": []}
 
 
 class TestApplySafetyHeuristic:
     def test_no_reclassification(self):
+        config = _default_config()
         findings = {
             "fix": [{"summary": "test", "files_affected": ["src/app.ts"]}],
             "design": [],
         }
-        count = apply_safety_heuristic(findings)
+        count = apply_safety_heuristic(findings, config)
         assert count == 0
         assert len(findings["fix"]) == 1
 
     def test_too_many_files(self):
+        config = _default_config()
         findings = {
             "fix": [{
                 "summary": "big change",
@@ -225,13 +232,14 @@ class TestApplySafetyHeuristic:
             }],
             "design": [],
         }
-        count = apply_safety_heuristic(findings)
+        count = apply_safety_heuristic(findings, config)
         assert count == 1
         assert len(findings["fix"]) == 0
         assert len(findings["design"]) == 1
         assert findings["design"][0]["reclassified_from"] == "fix"
 
     def test_architectural_path(self):
+        config = _default_config()
         findings = {
             "fix": [{
                 "summary": "schema change",
@@ -239,7 +247,7 @@ class TestApplySafetyHeuristic:
             }],
             "design": [],
         }
-        count = apply_safety_heuristic(findings)
+        count = apply_safety_heuristic(findings, config)
         assert count == 1
         assert len(findings["design"]) == 1
 
@@ -262,55 +270,21 @@ class TestGenerateEscalationDoc:
 
 class TestScopedClean:
     @patch("claude_sdlc.orchestrator._sp")
-    def test_no_changes_skips_stash(self, mock_sp, capsys):
+    def test_no_changes_skips_stash(self, mock_sp, capsys, tmp_path):
         mock_sp.run.return_value = MagicMock(stdout="", returncode=0)
-        _scoped_clean("1-1", "2026-03-25T10:00:00")
+        _scoped_clean("1-1", "2026-03-25T10:00:00", tmp_path)
         captured = capsys.readouterr()
         assert "skipping stash" in captured.out.lower()
 
     @patch("claude_sdlc.orchestrator._sp")
-    def test_stash_called(self, mock_sp):
+    def test_stash_called(self, mock_sp, tmp_path):
         status_result = MagicMock(stdout="M file.py\n", returncode=0)
         stash_result = MagicMock(stdout="", returncode=0)
         mock_sp.run.side_effect = [status_result, stash_result]
-        _scoped_clean("1-1", "2026-03-25T10:00:00")
+        _scoped_clean("1-1", "2026-03-25T10:00:00", tmp_path)
         calls = mock_sp.run.call_args_list
         assert len(calls) == 2
         assert "stash" in calls[1][0][0]
-
-
-class TestSchemaDriftCheck:
-    def test_no_drift(self):
-        """Clean schema — drizzle-kit reports no changes."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "No schema changes, nothing to migrate"
-        mock_result.stderr = ""
-        with patch("claude_sdlc.orchestrator._sp.run", return_value=mock_result):
-            assert run_schema_drift_check("5-1") is True
-
-    def test_drift_detected(self):
-        """Schema drift — drizzle-kit generated a new migration."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "1 migration generated: 0001_add_new_column.sql"
-        mock_result.stderr = ""
-        with patch("claude_sdlc.orchestrator._sp.run", return_value=mock_result):
-            assert run_schema_drift_check("5-1") is False
-
-    def test_drizzle_kit_not_found(self):
-        """drizzle-kit binary not available — returns False with error log."""
-        with patch("claude_sdlc.orchestrator._sp.run", side_effect=FileNotFoundError("npm not found")):
-            assert run_schema_drift_check("5-1") is False
-
-    def test_nonzero_exit_code(self):
-        """drizzle-kit exits with error — returns False."""
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-        mock_result.stderr = "Error: could not find drizzle config"
-        with patch("claude_sdlc.orchestrator._sp.run", return_value=mock_result):
-            assert run_schema_drift_check("5-1") is False
 
 
 class TestDryRunMode:
@@ -318,6 +292,7 @@ class TestDryRunMode:
 
     def test_should_run_step_with_skip_flag(self):
         """skip=True prevents any step from running, regardless of name."""
-        assert should_run_step("create-story", "create-story", True) is False
-        assert should_run_step("dev-story", "create-story", True) is False
-        assert should_run_step("dev-story", "create-story", False) is True
+        steps = _default_config().story.pipeline_steps
+        assert should_run_step("create-story", "create-story", True, steps) is False
+        assert should_run_step("dev-story", "create-story", True, steps) is False
+        assert should_run_step("dev-story", "create-story", False, steps) is True

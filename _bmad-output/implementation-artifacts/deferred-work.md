@@ -8,3 +8,7 @@
 ## From Story 3 — CLI Entry Point
 
 - **Stale `auto_story.py` docstring in orchestrator.py**: Module docstring (lines 1-23) still references `auto_story.py` and `python automation/auto_story.py --story 1-3`. Should be updated to reference `csdlc run` when Story 4 refactors the orchestrator.
+
+## From Story 4 — Orchestrator Extraction
+
+- **Trailing slash inconsistency in `glob_implementation_files` startswith check**: `f.startswith(d)` where `d` comes from `config.project.source_dirs` can match unintended prefixes (e.g. `source_dirs=["packages"]` matches `packagesX/`). Should use `f.startswith(d.rstrip("/") + "/")` or enforce trailing slashes in config validation.

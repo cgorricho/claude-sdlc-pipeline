@@ -1,6 +1,6 @@
 """Integration tests — multi-module pipeline paths with mocked subprocess.
 
-Tests exercise interaction between auto_story.py, runner.py, contracts.py,
+Tests exercise interaction between orchestrator.py, runner.py, contracts.py,
 and run_log.py. Mock at subprocess boundary only.
 """
 
@@ -14,6 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from claude_sdlc.config import Config
 from claude_sdlc.run_log import RunLog, StepLog, StepStatus
 from claude_sdlc.runner import RunResult
 from claude_sdlc.contracts import validate_code_review, ContractResult
@@ -34,6 +35,11 @@ from tests.conftest import (
     RUN_LOG_CORRUPTED_NO_STORY,
     RUN_LOG_CORRUPTED_INVALID_STATUS,
 )
+
+
+def _default_config() -> Config:
+    """Return a default Config instance for testing."""
+    return Config()
 
 
 class TestHappyPathPipeline:
@@ -97,20 +103,20 @@ class TestModeAWithFixRetry:
 
     def test_findings_parsed_and_applied(self, tmp_path):
         """Verify FIX findings trigger retry and safety heuristic runs."""
+        config = _default_config()
         # Set up findings file
         impl_dir = tmp_path / "impl"
         impl_dir.mkdir()
         findings_file = impl_dir / "2-1-code-review-findings.md"
         findings_file.write_text(FINDINGS_WITH_FIX.format(story_key="2-1"))
 
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", impl_dir):
-            findings = parse_review_findings("2-1")
+        findings = parse_review_findings("2-1", impl_dir)
 
         assert len(findings["fix"]) >= 1
         assert len(findings["design"]) == 0
 
         # Safety heuristic should not reclassify (files < MAX_FIX_FILES)
-        reclassified = apply_safety_heuristic(findings)
+        reclassified = apply_safety_heuristic(findings, config)
         assert reclassified == 0
 
 
@@ -136,8 +142,7 @@ class TestModeBCodexSuccess:
         assert result.passed
 
         # parse_review_findings should find the FIX
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", impl_dir):
-            findings = parse_review_findings("2-1")
+        findings = parse_review_findings("2-1", impl_dir)
         assert len(findings["fix"]) == 1
 
 
@@ -159,8 +164,7 @@ class TestModeBCodexParsedFindings:
             "session id: 019d5a6f\n"
         )
 
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", impl_dir):
-            findings = parse_review_findings("4-1")
+        findings = parse_review_findings("4-1", impl_dir)
 
         fix_count = len(findings.get("fix", []))
         design_count = len(findings.get("design", []))
@@ -188,8 +192,7 @@ class TestModeBCodexParsedFindings:
             "+const x = 1;\n"
         )
 
-        with patch("claude_sdlc.orchestrator.IMPL_ARTIFACTS", impl_dir):
-            findings = parse_review_findings("4-2")
+        findings = parse_review_findings("4-2", impl_dir)
 
         fix_count = len(findings.get("fix", []))
         design_count = len(findings.get("design", []))
@@ -229,12 +232,13 @@ class TestResumeFromPaused:
 
     def test_resumed_at_populated(self, tmp_path):
         """P7: When resuming a paused step, resumed_at is set."""
+        config = _default_config()
         run_log_path = tmp_path / "run_log.yaml"
         with open(run_log_path, "w") as f:
             yaml.dump(RUN_LOG_PAUSED, f, default_flow_style=False, sort_keys=False)
 
         run_log = RunLog.load(run_log_path)
-        start_from = determine_resume_step(run_log)
+        start_from = determine_resume_step(run_log, config.story.pipeline_steps)
         assert start_from == "code-review"
 
         # Simulate the P7 fix: set resumed_at on paused step

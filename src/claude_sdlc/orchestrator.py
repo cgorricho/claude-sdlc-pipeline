@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-auto_story.py — Automate the BMAD story cycle for a single story.
+orchestrator.py — Automate the SDLC story cycle for a single story.
 
 Phase 2: Hardened pipeline with robust resume, pipeline-owned ceremony
 transitions, verify-after-fix loop, scoped clean, and observability.
@@ -8,13 +8,13 @@ transitions, verify-after-fix loop, scoped clean, and observability.
 Pipeline: create-story → dev-story → verify → code-review → trace
 
 Usage:
-    python automation/auto_story.py --story 1-3
-    python automation/auto_story.py --story 1-3 --skip-create
-    python automation/auto_story.py --story 1-3 --skip-trace
-    python automation/auto_story.py --story 1-3 --resume
-    python automation/auto_story.py --story 1-3 --resume-from code-review
-    python automation/auto_story.py --story 1-3 --review-mode B
-    python automation/auto_story.py --story 1-3 --dry-run
+    csdlc run --story 1-3
+    csdlc run --story 1-3 --skip-create
+    csdlc run --story 1-3 --skip-trace
+    csdlc run --story 1-3 --resume
+    csdlc run --story 1-3 --resume-from code-review
+    csdlc run --story 1-3 --review-mode B
+    csdlc run --story 1-3 --dry-run
 
 Exit codes:
     0 — Story completed successfully
@@ -32,31 +32,34 @@ from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
 
-from claude_sdlc.config import (
-    PROJECT_ROOT, SPRINT_STATUS, IMPL_ARTIFACTS, RUNS_DIR,
-    DEV_MODEL, REVIEW_MODEL, MAX_REVIEW_RETRIES, STEP_MODES, WORKFLOWS,
-    PIPELINE_STEPS, ARCHITECTURAL_PATHS, MAX_FIX_FILES,
-    DEFAULT_STORY_TYPE, get_review_step_mode,
-)
+from claude_sdlc.config import Config, get_config
 from claude_sdlc.contracts import (
-    ContractResult, find_story_file,
-    validate_create_story, validate_dev_story, validate_trace,
     check_dev_story_status_gap,
+    find_story_file,
+    validate_create_story,
+    validate_dev_story,
+    validate_trace,
 )
-from claude_sdlc.state import (
-    read_sprint_status, get_story_status, update_story_status,
-    read_story_type, read_story_tags,
-)
-from claude_sdlc.runner import run_workflow, run_build_verify, run_codex_review, parse_test_results, select_review_mode
 from claude_sdlc.prompts import (
-    create_story_prompt, dev_story_prompt,
-    code_review_prompt, trace_prompt,
-    mode_b_cursor_prompt, mode_b_resume_instructions,
+    code_review_prompt,
     codex_review_prompt,
-    extract_referenced_sections, build_prompt_with_budget,
+    create_story_prompt,
+    dev_story_prompt,
+    extract_referenced_sections,
     measure_prompt,
+    mode_b_cursor_prompt,
+    mode_b_resume_instructions,
+    trace_prompt,
 )
 from claude_sdlc.run_log import RunLog, StepLog, StepStatus
+from claude_sdlc.runner import parse_test_results, run_build_verify, run_codex_review, run_workflow, select_review_mode
+from claude_sdlc.state import (
+    get_story_status,
+    read_sprint_status,
+    read_story_tags,
+    read_story_type,
+    update_story_status,
+)
 
 
 def run_pipeline(
@@ -71,32 +74,40 @@ def run_pipeline(
     clean: bool = False,
     verbose: bool = False,
 ) -> None:
-    """Execute the full BMAD story pipeline for a single story."""
+    """Execute the full SDLC story pipeline for a single story."""
+    config = get_config()
+    project_root = Path(config.project.root)
+    sprint_status = Path(config.paths.sprint_status)
+    impl_artifacts = Path(config.paths.impl_artifacts)
+    runs_dir = Path(config.paths.runs)
+    test_artifacts = Path(config.paths.test_artifacts)
+    pipeline_steps = config.story.pipeline_steps
+
     now = datetime.now()
     dir_timestamp = now.strftime("%Y-%m-%dT%H-%M-%S")   # File-safe (for directory names)
     iso_timestamp = now.isoformat()                       # Proper ISO (for run_log)
 
     # ── Scoped clean (Phase 2 spec 4.7) ────────────────────────────
     if clean:
-        _scoped_clean(story_key, iso_timestamp)
+        _scoped_clean(story_key, iso_timestamp, project_root)
 
     # ── Resume or new run ──────────────────────────────────────────
     if resume or resume_from:
-        run_dir = find_latest_run(story_key)
+        run_dir = find_latest_run(story_key, runs_dir)
         if not run_dir:
             if resume:
                 print(f"ERROR: No previous run found for story {story_key}",
                       file=sys.stderr)
                 sys.exit(1)
             # --resume-from without existing run: start fresh from that step
-            run_dir = RUNS_DIR / f"{dir_timestamp}_{story_key}"
+            run_dir = runs_dir / f"{dir_timestamp}_{story_key}"
             if not dry_run:
                 run_dir.mkdir(parents=True, exist_ok=True)
             run_log = RunLog(
                 story=story_key,
                 started=iso_timestamp,
-                dev_model=DEV_MODEL,
-                review_model=REVIEW_MODEL,
+                dev_model=config.models.dev,
+                review_model=config.models.review,
             )
             start_from = resume_from
         elif (run_dir / "run_log.yaml").exists():
@@ -121,22 +132,22 @@ def run_pipeline(
             except Exception as e:
                 print(f"ERROR: Failed to load run_log.yaml: {e}", file=sys.stderr)
                 print(f"  Run directory: {run_dir}", file=sys.stderr)
-                print(f"  Consider starting fresh: python automation/auto_story.py "
+                print(f"  Consider starting fresh: csdlc run "
                       f"--story {story_key} --resume-from {resume_from or 'create-story'}",
                       file=sys.stderr)
                 sys.exit(1)
-            start_from = resume_from or determine_resume_step(run_log)
+            start_from = resume_from or determine_resume_step(run_log, pipeline_steps)
         else:
             # Phase 2 (spec 4.6.3): run dir exists but no run_log — reconstruct
             run_log = RunLog(
                 story=story_key,
                 started=iso_timestamp,
-                dev_model=DEV_MODEL,
-                review_model=REVIEW_MODEL,
+                dev_model=config.models.dev,
+                review_model=config.models.review,
                 recovered=True,
             )
             start_from = resume_from or "create-story"
-            print(f"  NOTE: Run log missing, reconstructed with recovered=True")
+            print("  NOTE: Run log missing, reconstructed with recovered=True")
         # Guard against legacy run logs with review_mode: C
         if run_log.review_mode not in ("A", "B"):
             print(f"ERROR: Run log contains unsupported review_mode: {run_log.review_mode!r}. "
@@ -151,19 +162,19 @@ def run_pipeline(
         print(f"Resuming story {story_key} from {start_from}")
         print(f"  Run directory: {run_dir}")
     else:
-        run_dir = RUNS_DIR / f"{dir_timestamp}_{story_key}"
+        run_dir = runs_dir / f"{dir_timestamp}_{story_key}"
         if not dry_run:
             run_dir.mkdir(parents=True, exist_ok=True)
         run_log = RunLog(
             story=story_key,
             started=iso_timestamp,
-            dev_model=DEV_MODEL,
-            review_model=REVIEW_MODEL,
+            dev_model=config.models.dev,
+            review_model=config.models.review,
         )
         start_from = "create-story"
         print(f"Starting story {story_key}")
         print(f"  Run directory: {run_dir}")
-        print(f"  Dev model: {DEV_MODEL} | Review model: {REVIEW_MODEL}")
+        print(f"  Dev model: {config.models.dev} | Review model: {config.models.review}")
 
     run_log_path = run_dir / "run_log.yaml"
 
@@ -175,28 +186,28 @@ def run_pipeline(
         print("\n=== DRY RUN ===")
         print(f"Story: {story_key}")
         print(f"Start from: {start_from}")
-        print(f"Steps to run:")
-        for step in PIPELINE_STEPS:
+        print("Steps to run:")
+        for step in pipeline_steps:
             skip = (step == "create-story" and skip_create) or \
                    (step == "trace" and skip_trace)
-            will_run = should_run_step(step, start_from, skip)
+            will_run = should_run_step(step, start_from, skip, pipeline_steps)
             marker = "  SKIP" if not will_run else "  RUN "
             print(f"  {marker}  {step}")
         sys.exit(0)
 
     # ── STEP 1: Create Story ──────────────────────────────────────
-    if should_run_step("create-story", start_from, skip_create):
-        status = read_sprint_status(SPRINT_STATUS)
+    if should_run_step("create-story", start_from, skip_create, pipeline_steps):
+        status = read_sprint_status(sprint_status)
         current = get_story_status(status, story_key)
 
         if current != "backlog":
             log_step_skip(run_log, "create-story",
-                          f"Status is '{current}', not 'backlog'")
+                          f"Status is '{current}', not 'backlog'", config)
             log.info(f"  Skipping create-story: status is '{current}', not 'backlog'")
         else:
-            step_log = StepLog(step="create-story", mode=STEP_MODES["create-story"])
+            step_log = StepLog(step="create-story", mode=config.STEP_MODES["create-story"])
             step_log.started = now_iso()
-            log.info(f"Step 1/4: create-story → {WORKFLOWS['create-story']} (model: {DEV_MODEL})")
+            log.info(f"Step 1/4: create-story → {config.workflows['create-story']} (model: {config.models.dev})")
 
             prompt = create_story_prompt(story_key)
             run_log.prompt_sizes["create-story"] = len(prompt)
@@ -205,14 +216,14 @@ def run_pipeline(
             exit_code, _ = run_workflow(
                 "create-story",
                 prompt,
-                DEV_MODEL,
+                config.models.dev,
                 run_dir / "01-create-story.stdout.md",
-                PROJECT_ROOT,
+                project_root,
                 verbose=verbose,
             )
             log.debug(f"Claude exit code: {exit_code}")
 
-            result = validate_create_story(story_key, IMPL_ARTIFACTS, SPRINT_STATUS)
+            result = validate_create_story(story_key, impl_artifacts, sprint_status)
             if not result.passed:
                 log.error(f"Contract violation: {result.error}")
                 fail_step(run_log, step_log, run_log_path,
@@ -226,8 +237,8 @@ def run_pipeline(
             log.info(f"  create-story completed ✓ ({step_log.duration_seconds}s)")
 
     # ── STEP 2: Dev Story + Verify ────────────────────────────────
-    if should_run_step("dev-story", start_from, False):
-        story_file = find_story_file(story_key, IMPL_ARTIFACTS)
+    if should_run_step("dev-story", start_from, False, pipeline_steps):
+        story_file = find_story_file(story_key, impl_artifacts)
         if not story_file:
             log.error(f"No story file found matching {story_key}-*.md")
             sys.exit(1)
@@ -247,9 +258,9 @@ def run_pipeline(
         ref_context = "\n\n".join(f"### {k}\n{v}" for k, v in ref_sections.items())
         log.debug(f"Extracted {len(ref_sections)} referenced sections")
 
-        step_log = StepLog(step="dev-story", mode=STEP_MODES["dev-story"])
+        step_log = StepLog(step="dev-story", mode=config.STEP_MODES["dev-story"])
         step_log.started = now_iso()
-        log.info(f"Step 2/4: dev-story → {WORKFLOWS['dev-story']} (model: {DEV_MODEL})")
+        log.info(f"Step 2/4: dev-story → {config.workflows['dev-story']} (model: {config.models.dev})")
         log.info(f"  Story file: {story_file.name}")
 
         prompt = dev_story_prompt(str(story_file), ref_context)
@@ -259,16 +270,16 @@ def run_pipeline(
         exit_code, _ = run_workflow(
             "dev-story",
             prompt,
-            DEV_MODEL,
+            config.models.dev,
             run_dir / "02-dev-story.stdout.md",
-            PROJECT_ROOT,
+            project_root,
             verbose=verbose,
         )
         log.debug(f"Claude exit code: {exit_code}")
 
         # Independent verification (AD-2)
         log.info("  Running independent build+test verification...")
-        build_ok, test_ok = run_build_verify(PROJECT_ROOT, run_dir)
+        build_ok, test_ok = run_build_verify(project_root, run_dir)
         test_summary = parse_test_results(run_dir / "test-results.json") if test_ok else {}
 
         log.info(f"  Build: {'PASS' if build_ok else 'FAIL'}")
@@ -282,26 +293,19 @@ def run_pipeline(
         elif not test_ok:
             log.info(f"  Tests: FAIL. See: {run_dir / 'test-output.log'}")
 
-        result = validate_dev_story(story_key, SPRINT_STATUS, build_ok, test_ok)
+        result = validate_dev_story(story_key, sprint_status, build_ok, test_ok)
         if not result.passed:
             log.error(f"Contract violation: {result.error}")
             fail_step(run_log, step_log, run_log_path,
                       f"Contract violation: {result.error}")
 
-        # Schema drift check — catch missing migrations before code review
-        if build_ok and test_ok:
-            log.info("  Running schema drift check...")
-            drift_clean = run_schema_drift_check(story_key)
-            if not drift_clean:
-                log.error("  Schema drift detected — generate migration before proceeding")
-                fail_step(run_log, step_log, run_log_path,
-                          "Schema drift detected: schema changes without corresponding migration")
+        # Plugin hook: pre_review_checks (see Story 5)
 
         # Phase 2 (spec 4.3): Check for sprint-status gap and pipeline-own the transition
-        has_status_gap = check_dev_story_status_gap(story_key, SPRINT_STATUS)
+        has_status_gap = check_dev_story_status_gap(story_key, sprint_status)
         if has_status_gap:
             log.info("  Sprint-status gap detected — pipeline updating to 'review' (AD-13)")
-            update_story_status(SPRINT_STATUS, story_key, "review")
+            update_story_status(sprint_status, story_key, "review")
             step_log.status = str(StepStatus.COMPLETED_WITH_GAPS)
         else:
             step_log.status = str(StepStatus.COMPLETED)
@@ -316,8 +320,8 @@ def run_pipeline(
         log.info(f"  dev-story {step_log.status} ✓ ({step_log.duration_seconds}s)")
 
     # ── STEP 3: Code Review (with retry + escalation) ─────────────
-    if should_run_step("code-review", start_from, False):
-        story_file = find_story_file(story_key, IMPL_ARTIFACTS)
+    if should_run_step("code-review", start_from, False, pipeline_steps):
+        story_file = find_story_file(story_key, impl_artifacts)
         if not story_file:
             log.error("No story file found")
             sys.exit(1)
@@ -329,16 +333,16 @@ def run_pipeline(
             if stale_results.exists():
                 stale_results.unlink()
                 log.debug("  Invalidated stale test-results.json")
-            build_ok, test_ok = run_build_verify(PROJECT_ROOT, run_dir)
+            build_ok, test_ok = run_build_verify(project_root, run_dir)
             if not build_ok or not test_ok:
-                log.error(f"  Build/test failed on resume. Fix before retrying.")
+                log.error("  Build/test failed on resume. Fix before retrying.")
                 if not build_ok:
                     log.error(f"  See: {run_dir / 'build-output.log'}")
                 if not test_ok:
                     log.error(f"  See: {run_dir / 'test-output.log'}")
                 sys.exit(1)
 
-        review_step_mode = get_review_step_mode(run_log.review_mode)
+        review_step_mode = config.STEP_MODES[f"code-review-mode-{run_log.review_mode.lower()}"]
 
         # Mode B: try Codex automated review, fall back to manual Cursor (D2/D3)
         if run_log.review_mode == "B":
@@ -365,7 +369,7 @@ def run_pipeline(
                 step_log.started = now_iso()
 
                 # Consume human-produced findings file
-                findings = parse_review_findings(story_key)
+                findings = parse_review_findings(story_key, impl_artifacts)
                 fix_count = len(findings.get("fix", []))
                 design_count = len(findings.get("design", []))
                 note_count = len(findings.get("note", []))
@@ -418,7 +422,7 @@ def run_pipeline(
                 )
                 step_log.started = now_iso()
 
-                file_inv = glob_implementation_files(story_key)
+                file_inv = glob_implementation_files(story_key, config)
                 test_summary_str = json.dumps(
                     parse_test_results(run_dir / "test-results.json"),
                     indent=2,
@@ -428,7 +432,7 @@ def run_pipeline(
                 log.info(f"  Tags for checklist: {', '.join(story_tags) if story_tags else 'none'}")
 
                 # D2: Try Codex automated adversarial review
-                log.info(f"Step 3/4: code-review → Mode B (invoking Codex adversarial review)")
+                log.info("Step 3/4: code-review → Mode B (invoking Codex adversarial review)")
                 codex_failed = False
                 codex_failure_reason = ""
                 try:
@@ -437,8 +441,8 @@ def run_pipeline(
                         story_tags=story_tags,
                     )
                     codex_result = run_codex_review(
-                        story_key, run_dir, IMPL_ARTIFACTS, review_prompt_text,
-                        cwd=PROJECT_ROOT,
+                        story_key, run_dir, impl_artifacts, review_prompt_text,
+                        cwd=project_root,
                     )
                     if codex_result.exit_code != 0:
                         codex_failed = True
@@ -456,7 +460,7 @@ def run_pipeline(
                 if not codex_failed:
                     # Codex succeeded — parse findings and check for NOTE-only output
                     log.info("  Codex review completed — processing findings")
-                    findings = parse_review_findings(story_key)
+                    findings = parse_review_findings(story_key, impl_artifacts)
                     fix_count = len(findings.get("fix", []))
                     design_count = len(findings.get("design", []))
                     note_count = len(findings.get("note", []))
@@ -471,7 +475,7 @@ def run_pipeline(
                     }
 
                     # Apply safety heuristic (AD-8)
-                    reclassified = apply_safety_heuristic(findings)
+                    reclassified = apply_safety_heuristic(findings, config)
                     if reclassified > 0:
                         design_count = len(findings.get("design", []))
                         fix_count = len(findings.get("fix", []))
@@ -506,7 +510,7 @@ def run_pipeline(
                         log.info(f"AUTOMATION PAUSED — {reason}")
                         log.info(f"{'='*60}")
                         log.info(f"  Escalation doc: {escalation_path}")
-                        log.info(f"  Resume: python automation/auto_story.py --story {story_key} --resume")
+                        log.info(f"  Resume: csdlc run --story {story_key} --resume")
                         sys.exit(3)
 
                     # Finding 2 fix: NOTE-only or unparseable output → pause for manual review
@@ -514,7 +518,10 @@ def run_pipeline(
                         step_log.status = str(StepStatus.PAUSED)
                         step_log.paused_at = now_iso()
                         step_log.escalation = {
-                            "reason": f"Codex review produced {note_count} [NOTE]-only findings — manual review required",
+                            "reason": (
+                                f"Codex review produced {note_count} "
+                                "[NOTE]-only findings — manual review required"
+                            ),
                             "findings": findings.get("note", []),
                             "source": "codex",
                         }
@@ -526,11 +533,11 @@ def run_pipeline(
                         log.info(f"\n{'='*60}")
                         log.info(f"AUTOMATION PAUSED — {reason}")
                         log.info(f"{'='*60}")
-                        log.info(f"  Review the findings file and re-run with --resume")
+                        log.info("  Review the findings file and re-run with --resume")
                         sys.exit(3)
 
                     # Also check for non-empty unparseable Codex output (no tags at all)
-                    findings_file = _find_findings_file(story_key)
+                    findings_file = _find_findings_file(story_key, impl_artifacts)
                     if findings_file and fix_count == 0 and design_count == 0 and note_count == 0:
                         raw_content = _strip_stderr(findings_file.read_text()).strip()
                         # Non-trivial content with no recognized tags → suspicious
@@ -538,20 +545,26 @@ def run_pipeline(
                             step_log.status = str(StepStatus.PAUSED)
                             step_log.paused_at = now_iso()
                             step_log.escalation = {
-                                "reason": "Codex review produced non-trivial output with no recognized tags — manual review required",
+                                "reason": (
+                                    "Codex review produced non-trivial output "
+                                    "with no recognized tags — manual review required"
+                                ),
                                 "raw_length": len(raw_content),
                                 "source": "codex",
                             }
                             run_log.replace_or_append_step(step_log)
                             run_log.status = "paused"
-                            reason = "Codex output has no [FIX]/[DESIGN]/[NOTE] tags but is non-trivial — manual review required"
+                            reason = (
+                                "Codex output has no [FIX]/[DESIGN]/[NOTE] tags "
+                                "but is non-trivial — manual review required"
+                            )
                             run_log.human_interventions.add_planned(reason=reason, step="code-review")
                             run_log.save(run_log_path)
                             log.info(f"\n{'='*60}")
                             log.info(f"AUTOMATION PAUSED — {reason}")
                             log.info(f"{'='*60}")
                             log.info(f"  Findings file: {findings_file}")
-                            log.info(f"  Review manually and re-run with --resume")
+                            log.info("  Review manually and re-run with --resume")
                             sys.exit(3)
 
                     # Zero findings — code review passed clean
@@ -594,29 +607,32 @@ def run_pipeline(
                 run_log.save(run_log_path)
 
                 log.info(f"\n{'='*60}")
-                log.info(f"AUTOMATION PAUSED — Codex failed, manual Mode B required")
+                log.info("AUTOMATION PAUSED — Codex failed, manual Mode B required")
                 log.info(f"{'='*60}")
                 log.info(f"  Cursor prompt:       {cursor_prompt_path}")
                 log.info(f"  Resume instructions: {resume_path}")
-                log.info(f"  Resume command:      python automation/auto_story.py "
+                log.info(f"  Resume command:      csdlc run "
                          f"--story {story_key} --resume")
                 sys.exit(3)
 
         # Mode A: automated review with retry loop
-        for attempt in range(1, MAX_REVIEW_RETRIES + 2):
+        for attempt in range(1, config.review.max_retries + 2):
             step_log = StepLog(
                 step="code-review",
                 mode=review_step_mode,
                 attempt=run_log.next_attempt("code-review"),
             )
             step_log.started = now_iso()
-            log.info(f"Step 3/4: code-review → {WORKFLOWS['code-review']} Mode A (model: {REVIEW_MODEL}, attempt {attempt})")
+            log.info(
+                f"Step 3/4: code-review → {config.workflows['code-review']} "
+                f"Mode A (model: {config.models.review}, attempt {attempt})"
+            )
 
             test_summary_str = json.dumps(
                 parse_test_results(run_dir / "test-results.json")
             ) if (run_dir / "test-results.json").exists() else "{}"
 
-            file_inv = glob_implementation_files(story_key)
+            file_inv = glob_implementation_files(story_key, config)
 
             suffix = f".attempt{attempt}" if attempt > 1 else ""
 
@@ -631,15 +647,15 @@ def run_pipeline(
             exit_code, stdout = run_workflow(
                 "code-review",
                 prompt,
-                REVIEW_MODEL,
+                config.models.review,
                 run_dir / f"03-code-review{suffix}.stdout.md",
-                PROJECT_ROOT,
+                project_root,
                 verbose=verbose,
             )
             log.debug(f"Claude exit code: {exit_code}")
 
             # Parse findings for [FIX] vs [DESIGN] classification (AD-8)
-            findings = parse_review_findings(story_key)
+            findings = parse_review_findings(story_key, impl_artifacts)
             fix_count = len(findings.get("fix", []))
             design_count = len(findings.get("design", []))
 
@@ -652,7 +668,7 @@ def run_pipeline(
             log.info(f"  Findings: {fix_count} [FIX], {design_count} [DESIGN]")
 
             # Apply safety heuristic — reclassify [FIX] → [DESIGN] if dangerous (AD-8)
-            reclassified = apply_safety_heuristic(findings)
+            reclassified = apply_safety_heuristic(findings, config)
             if reclassified > 0:
                 design_count = len(findings.get("design", []))
                 fix_count = len(findings.get("fix", []))
@@ -668,7 +684,7 @@ def run_pipeline(
                     stale_results.unlink()
                     log.debug("  Invalidated stale test-results.json")
 
-                build_ok, test_ok = run_build_verify(PROJECT_ROOT, run_dir)
+                build_ok, test_ok = run_build_verify(project_root, run_dir)
                 step_log.fixes_applied = findings["fix"]
                 if not build_ok or not test_ok:
                     log.warning("  Build/test failed after [FIX] applications")
@@ -702,12 +718,12 @@ def run_pipeline(
                 log.info(f"AUTOMATION PAUSED — {design_count} [DESIGN] decision(s) required")
                 log.info(f"{'='*60}")
                 log.info(f"  Escalation doc: {escalation_path}")
-                log.info(f"  Resume: python automation/auto_story.py "
+                log.info(f"  Resume: csdlc run "
                          f"--story {story_key} --resume")
                 sys.exit(3)
 
             # Check outcome — no [DESIGN] items
-            status = read_sprint_status(SPRINT_STATUS)
+            status = read_sprint_status(sprint_status)
             story_stat = get_story_status(status, story_key)
 
             if story_stat == "done":
@@ -721,32 +737,32 @@ def run_pipeline(
 
             if story_stat == "in-progress":
                 # [FIX] items were applied but story needs more work
-                if attempt > MAX_REVIEW_RETRIES:
+                if attempt > config.review.max_retries:
                     step_log.status = str(StepStatus.FAILED)
                     run_log.replace_or_append_step(step_log)
                     run_log.status = "failed"
                     run_log.save(run_log_path)
                     log.error(
-                        f"code-review FAILED after {MAX_REVIEW_RETRIES} retries. "
+                        f"code-review FAILED after {config.review.max_retries} retries. "
                         "Manual intervention required."
                     )
                     sys.exit(2)
 
                 log.info(f"  [FIX] issues found — re-running dev-story "
-                         f"(retry {attempt}/{MAX_REVIEW_RETRIES})")
+                         f"(retry {attempt}/{config.review.max_retries})")
 
                 # Re-run dev-story to apply fixes
                 run_workflow(
                     "dev-story",
                     dev_story_prompt(str(story_file)),
-                    DEV_MODEL,
+                    config.models.dev,
                     run_dir / f"02-dev-story.retry{attempt}.stdout.md",
-                    PROJECT_ROOT,
+                    project_root,
                     verbose=verbose,
                 )
 
                 # Re-verify
-                build_ok, test_ok = run_build_verify(PROJECT_ROOT, run_dir)
+                build_ok, test_ok = run_build_verify(project_root, run_dir)
                 if not build_ok or not test_ok:
                     log.warning(f"  Build/test failed after retry {attempt}")
                     if not build_ok:
@@ -774,7 +790,7 @@ def run_pipeline(
             sys.exit(1)
 
     # ── STEP 4: Trace (optional) ──────────────────────────────────
-    if should_run_step("trace", start_from, skip_trace):
+    if should_run_step("trace", start_from, skip_trace, pipeline_steps):
         # Phase 2 (spec 4.5.2): Re-verify on resume before trace
         if resume or resume_from:
             log.info("  Re-verifying build+test before trace (resume path)...")
@@ -782,21 +798,21 @@ def run_pipeline(
             if stale_results.exists():
                 stale_results.unlink()
                 log.debug("  Invalidated stale test-results.json")
-            build_ok, test_ok = run_build_verify(PROJECT_ROOT, run_dir)
+            build_ok, test_ok = run_build_verify(project_root, run_dir)
             if not build_ok or not test_ok:
-                log.error(f"  Build/test failed on resume before trace. Fix before retrying.")
+                log.error("  Build/test failed on resume before trace. Fix before retrying.")
                 if not build_ok:
                     log.error(f"  See: {run_dir / 'build-output.log'}")
                 if not test_ok:
                     log.error(f"  See: {run_dir / 'test-output.log'}")
                 sys.exit(1)
 
-        step_log = StepLog(step="trace", mode=STEP_MODES["trace"])
+        step_log = StepLog(step="trace", mode=config.STEP_MODES["trace"])
         step_log.started = now_iso()
-        log.info(f"Step 4/4: trace → {WORKFLOWS['trace']} (model: {DEV_MODEL})")
+        log.info(f"Step 4/4: trace → {config.workflows['trace']} (model: {config.models.dev})")
 
-        story_file = find_story_file(story_key, IMPL_ARTIFACTS)
-        story_type = read_story_type(story_file) if story_file else DEFAULT_STORY_TYPE
+        story_file = find_story_file(story_key, impl_artifacts)
+        story_type = read_story_type(story_file) if story_file else config.story.default_type
         test_summary_str = json.dumps(
             parse_test_results(run_dir / "test-results.json")
         ) if (run_dir / "test-results.json").exists() else "{}"
@@ -808,15 +824,15 @@ def run_pipeline(
         exit_code, _ = run_workflow(
             "trace",
             prompt,
-            DEV_MODEL,
+            config.models.dev,
             run_dir / "04-trace.stdout.md",
-            PROJECT_ROOT,
+            project_root,
             verbose=verbose,
         )
         log.debug(f"Claude exit code: {exit_code}")
 
         # Validate trace output
-        trace_report = PROJECT_ROOT / "_bmad-output/test-artifacts" / f"traceability-report-{story_key}.md"
+        trace_report = test_artifacts / f"traceability-report-{story_key}.md"
         result = validate_trace(trace_report)
         if not result.passed:
             # Trace is informational — log warning but don't fail the pipeline
@@ -835,7 +851,7 @@ def run_pipeline(
 
         # Phase 2 (spec 4.3.2): Pipeline updates sprint-status to 'done' after trace PASS
         try:
-            update_story_status(SPRINT_STATUS, story_key, "done")
+            update_story_status(sprint_status, story_key, "done")
             log.info("  Sprint-status updated to 'done' (AD-13)")
         except Exception as e:
             log.warning(f"  Failed to update sprint-status to 'done': {e}")
@@ -875,30 +891,30 @@ def main(story_key=None, **kwargs):
 
 # ── Helper functions ──────────────────────────────────────────────
 
-def _scoped_clean(story_key: str, timestamp: str):
+def _scoped_clean(story_key: str, timestamp: str, project_root: Path):
     """Phase 2 (spec 4.7): Stash uncommitted changes instead of git checkout.
 
-    Uses git stash with a label so Carlos can recover if needed.
+    Uses git stash with a label so the user can recover if needed.
     """
     # Check if there are uncommitted changes
     result = _sp.run(
         ["git", "status", "--porcelain"],
-        capture_output=True, text=True, cwd=PROJECT_ROOT,
+        capture_output=True, text=True, cwd=project_root,
     )
     if not result.stdout.strip():
         print("  No uncommitted changes — skipping stash")
         return
 
-    stash_msg = f"auto_story clean: {story_key} {timestamp}"
+    stash_msg = f"csdlc clean: {story_key} {timestamp}"
     print(f"Stashing uncommitted changes: {stash_msg}")
     result = _sp.run(
         ["git", "stash", "push", "-m", stash_msg],
-        capture_output=True, text=True, cwd=PROJECT_ROOT,
+        capture_output=True, text=True, cwd=project_root,
     )
     if result.returncode != 0:
         print(f"WARNING: git stash failed: {result.stderr.strip()}", file=sys.stderr)
     else:
-        print(f"  Changes stashed ✓ (recover with: git stash pop)")
+        print("  Changes stashed ✓ (recover with: git stash pop)")
 
 
 def setup_logging(run_dir: Path, verbose: bool = False, dry_run: bool = False):
@@ -928,15 +944,15 @@ def setup_logging(run_dir: Path, verbose: bool = False, dry_run: bool = False):
         log.addHandler(file_handler)
 
 
-def should_run_step(step: str, start_from: str, skip: bool) -> bool:
+def should_run_step(step: str, start_from: str, skip: bool, pipeline_steps: list[str]) -> bool:
     """Determine if a step should run based on resume point and skip flags."""
     if skip:
         return False
-    step_order = {s: i for i, s in enumerate(PIPELINE_STEPS)}
+    step_order = {s: i for i, s in enumerate(pipeline_steps)}
     return step_order.get(step, 0) >= step_order.get(start_from, 0)
 
 
-def determine_resume_step(run_log: RunLog) -> str:
+def determine_resume_step(run_log: RunLog, pipeline_steps: list[str]) -> str:
     """Find the step to resume from based on run log."""
     if not run_log.steps:
         return "create-story"
@@ -944,13 +960,13 @@ def determine_resume_step(run_log: RunLog) -> str:
     if last.status in (str(StepStatus.PAUSED), str(StepStatus.FAILED)):
         return last.step
     # Resume from next step after last completed
-    idx = PIPELINE_STEPS.index(last.step) + 1
-    return PIPELINE_STEPS[idx] if idx < len(PIPELINE_STEPS) else "trace"
+    idx = pipeline_steps.index(last.step) + 1
+    return pipeline_steps[idx] if idx < len(pipeline_steps) else "trace"
 
 
-def find_latest_run(story_key: str) -> Path | None:
+def find_latest_run(story_key: str, runs_dir: Path) -> Path | None:
     """Find the most recent run directory for a story."""
-    runs = sorted(RUNS_DIR.glob(f"*_{story_key}"), reverse=True)
+    runs = sorted(runs_dir.glob(f"*_{story_key}"), reverse=True)
     return runs[0] if runs else None
 
 
@@ -965,9 +981,9 @@ def elapsed_since(started: str) -> int:
     return int((datetime.now() - start).total_seconds())
 
 
-def log_step_skip(run_log: RunLog, step: str, reason: str):
+def log_step_skip(run_log: RunLog, step: str, reason: str, config: Config):
     """Log a skipped step in the run log."""
-    step_log = StepLog(step=step, mode=STEP_MODES.get(step, {}))
+    step_log = StepLog(step=step, mode=config.STEP_MODES.get(step, {}))
     step_log.status = str(StepStatus.SKIPPED)
     step_log.state_after = reason
     run_log.replace_or_append_step(step_log)
@@ -984,23 +1000,28 @@ def fail_step(run_log: RunLog, step_log: StepLog, run_log_path: Path, error: str
     sys.exit(1)
 
 
-def glob_implementation_files(story_key: str) -> str:
+def glob_implementation_files(story_key: str, config: Config) -> str:
     """List implementation files changed for this story.
 
-    Uses git diff to scope to actual changes, not the whole monorepo.
-    Falls back to full glob if git diff fails (e.g., uncommitted new files).
+    Uses git diff to scope to actual changes. Filters by config.project.source_dirs
+    (if set) and excludes patterns from config.project.exclude_patterns.
+    Falls back to listing source_dirs recursively if git diff fails.
     """
-    # Try git: changed + untracked files in packages/ and e2e/
+    project_root = Path(config.project.root)
+    source_dirs = config.project.source_dirs
+    exclude_patterns = config.project.exclude_patterns
+
+    # Try git: changed + untracked files
     try:
         # Changed files (staged + unstaged)
         diff_result = _sp.run(
             ["git", "diff", "--name-only", "HEAD"],
-            capture_output=True, text=True, cwd=PROJECT_ROOT
+            capture_output=True, text=True, cwd=project_root
         )
         # Untracked files
         untracked_result = _sp.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
-            capture_output=True, text=True, cwd=PROJECT_ROOT
+            capture_output=True, text=True, cwd=project_root
         )
 
         changed = set(diff_result.stdout.strip().splitlines()) if diff_result.stdout.strip() else set()
@@ -1010,8 +1031,8 @@ def glob_implementation_files(story_key: str) -> str:
         # Filter to implementation files only
         impl_files = sorted(
             f for f in all_changed
-            if (f.startswith("packages/") or f.startswith("e2e/"))
-            and not any(skip in f for skip in ["node_modules", "dist", ".turbo"])
+            if (not source_dirs or any(f.startswith(d) for d in source_dirs))
+            and not any(skip in f for skip in exclude_patterns)
         )
 
         if impl_files:
@@ -1019,25 +1040,28 @@ def glob_implementation_files(story_key: str) -> str:
     except Exception:
         pass
 
-    # Fallback: glob packages/ (less precise)
-    packages_dir = PROJECT_ROOT / "packages"
-    if not packages_dir.exists():
-        return "(no packages/ directory found)"
+    # Fallback: glob source_dirs (less precise)
+    if not source_dirs:
+        return "(no source_dirs configured and git diff unavailable)"
 
     files = []
-    for f in sorted(packages_dir.rglob("*")):
-        if f.is_file() and not any(
-            part in f.parts for part in ["node_modules", ".next", "dist", ".turbo"]
-        ):
-            rel = f.relative_to(PROJECT_ROOT)
-            files.append(str(rel))
+    for src_dir in source_dirs:
+        src_path = project_root / src_dir
+        if not src_path.exists():
+            continue
+        for f in sorted(src_path.rglob("*")):
+            if f.is_file() and not any(
+                part in f.parts for part in exclude_patterns
+            ):
+                rel = f.relative_to(project_root)
+                files.append(str(rel))
 
     return "\n".join(files) if files else "(no implementation files found)"
 
 
-def _find_findings_file(story_key: str) -> Path | None:
+def _find_findings_file(story_key: str, impl_artifacts: Path) -> Path | None:
     """Locate the findings file for a story key."""
-    for f in IMPL_ARTIFACTS.glob(f"{story_key}*findings*.md"):
+    for f in impl_artifacts.glob(f"{story_key}*findings*.md"):
         return f
     return None
 
@@ -1054,14 +1078,14 @@ def _strip_stderr(text: str) -> str:
     return text
 
 
-def parse_review_findings(story_key: str) -> dict:
+def parse_review_findings(story_key: str, impl_artifacts: Path) -> dict:
     """Parse code-review-findings.md for [FIX], [DESIGN], [NOTE], and Codex [P1]/[P2] tags.
 
     Returns dict with 'fix', 'design', and 'note' lists containing finding dicts.
     """
     findings = {"fix": [], "design": [], "note": []}
 
-    findings_file = _find_findings_file(story_key)
+    findings_file = _find_findings_file(story_key, impl_artifacts)
     if not findings_file or not findings_file.exists():
         return findings
 
@@ -1126,67 +1150,12 @@ def parse_review_findings(story_key: str) -> dict:
     return findings
 
 
-_drift_log = logging.getLogger("claude_sdlc.orchestrator.drift")
-
-
-def run_schema_drift_check(story_key: str) -> bool:
-    """Run drizzle-kit generate and check for schema drift.
-
-    Returns True if no drift (schema and migrations in sync), False if drift detected.
-    """
-    server_dir = PROJECT_ROOT / "packages" / "server"
-    try:
-        result = _sp.run(
-            ["npm", "run", "db:generate"],
-            cwd=str(server_dir),
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
-
-        # drizzle-kit generate exits 0 when clean, may print "No schema changes"
-        if result.returncode != 0:
-            _drift_log.warning(f"  Schema drift check failed (exit {result.returncode})")
-            if stdout:
-                _drift_log.warning(f"  stdout: {stdout}")
-            if stderr:
-                _drift_log.warning(f"  stderr: {stderr}")
-            return False
-
-        # Check for clean output indicators
-        if "No schema changes" in stdout or "nothing to generate" in stdout.lower():
-            _drift_log.info(f"  Schema drift check: clean — no drift for {story_key}")
-            return True
-
-        # If drizzle-kit generated new migration files, that's drift
-        if "migration" in stdout.lower() or "generated" in stdout.lower():
-            _drift_log.warning(f"  Schema drift detected for {story_key}:")
-            _drift_log.warning(f"  {stdout}")
-            # Clean up generated migration files to avoid dirtying git state
-            _sp.run(["git", "checkout", "--", "packages/server/drizzle/"],
-                    cwd=str(PROJECT_ROOT), capture_output=True)
-            return False
-
-        # Exit 0 with no migration-related output — treat as clean
-        _drift_log.info(f"  Schema drift check: clean (exit 0) for {story_key}")
-        return True
-
-    except FileNotFoundError:
-        _drift_log.error("  drizzle-kit not found — cannot run schema drift check")
-        return False
-    except _sp.TimeoutExpired:
-        _drift_log.error("  Schema drift check timed out (60s)")
-        return False
-
-
-def apply_safety_heuristic(findings: dict) -> int:
+def apply_safety_heuristic(findings: dict, config: Config) -> int:
     """Reclassify [FIX] items as [DESIGN] if they trigger safety heuristics (AD-8).
 
     A [FIX] is reclassified if:
-      - It affects more than MAX_FIX_FILES files
-      - It modifies files matching ARCHITECTURAL_PATHS patterns
+      - It affects more than config.safety.max_fix_files files
+      - It modifies files matching config.safety.architectural_paths patterns
 
     Returns count of reclassified findings.
     """
@@ -1197,13 +1166,13 @@ def apply_safety_heuristic(findings: dict) -> int:
         files = fix.get("files_affected", [])
 
         # Check file count threshold
-        if len(files) > MAX_FIX_FILES:
+        if len(files) > config.safety.max_fix_files:
             to_reclassify.append(fix)
             continue
 
         # Check architectural path patterns
         for f in files:
-            if any(fnmatch(f, pattern) for pattern in ARCHITECTURAL_PATHS):
+            if any(fnmatch(f, pattern) for pattern in config.safety.architectural_paths):
                 to_reclassify.append(fix)
                 break
 
@@ -1229,7 +1198,7 @@ def generate_escalation_doc(path: Path, story_key: str, findings: dict,
         "findings": [],
         "test_results_at_pause": str(run_dir / "test-results.json"),
         "action_required": "Run Party Mode or make decisions manually",
-        "resume_command": f"python automation/auto_story.py --story {story_key} --resume",
+        "resume_command": f"csdlc run --story {story_key} --resume",
     }
 
     for i, finding in enumerate(findings["design"], 1):
@@ -1244,4 +1213,3 @@ def generate_escalation_doc(path: Path, story_key: str, findings: dict,
         f.write("---\n")
         yaml.dump(escalation, f, default_flow_style=False, sort_keys=False)
         f.write("---\n")
-

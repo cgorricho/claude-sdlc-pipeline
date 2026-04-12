@@ -31,6 +31,10 @@ log = logging.getLogger("claude_sdlc.config")
 class ProjectConfig:
     root: str = "."
     name: str = ""
+    source_dirs: list[str] = field(default_factory=list)
+    exclude_patterns: list[str] = field(
+        default_factory=lambda: ["node_modules", "dist", ".next", ".turbo"]
+    )
 
 
 @dataclass(frozen=True)
@@ -369,7 +373,12 @@ def load_config(path: Path) -> Config:
 
     # Update project with resolved root
     if isinstance(project_section, ProjectConfig):
-        kwargs["project"] = ProjectConfig(root=project_root, name=project_section.name)
+        kwargs["project"] = ProjectConfig(
+            root=project_root,
+            name=project_section.name,
+            source_dirs=project_section.source_dirs,
+            exclude_patterns=project_section.exclude_patterns,
+        )
 
     # Interpolate paths
     paths_config = kwargs.get("paths", PathsConfig())
