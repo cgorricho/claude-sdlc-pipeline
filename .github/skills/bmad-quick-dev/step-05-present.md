@@ -57,9 +57,7 @@ Follow `./sync-sprint-status.md` with `{target_status}` = `review`.
 ### Commit and Open
 
 1. If version control is available and the tree is dirty, create a local commit with a conventional message derived from the spec title.
-2. Open the spec in the user's editor so they can click through the Suggested Review Order:
-   - Resolve two absolute paths: (1) the repository root (`git rev-parse --show-toplevel` — returns the worktree root when in a worktree, project root otherwise; if this fails, fall back to the current working directory), (2) `{spec_file}`. Run `code -r "{absolute-root}" "{absolute-spec-file}"` — the root first so VS Code opens in the right context, then the spec file. Always double-quote paths to handle spaces and special characters.
-   - If `code` is not available (command fails), skip gracefully and tell the user the spec file path instead.
+2. Tell the user the spec file path so they can open it and click through the Suggested Review Order. Display the path in CWD-relative format for terminal clickability. Do NOT run `code` CLI commands — `code -r` causes destructive workspace reloads in multi-window setups.
 
 ### Display Summary
 

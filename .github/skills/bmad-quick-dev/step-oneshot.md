@@ -49,9 +49,7 @@ If version control is available and the tree is dirty, create a local commit wit
 
 ### Present
 
-1. Open the spec in the user's editor so they can click through the Suggested Review Order:
-   - Resolve two absolute paths: (1) the repository root (`git rev-parse --show-toplevel` — returns the worktree root when in a worktree, project root otherwise; if this fails, fall back to the current working directory), (2) `{spec_file}`. Run `code -r "{absolute-root}" "{absolute-spec-file}"` — the root first so VS Code opens in the right context, then the spec file. Always double-quote paths to handle spaces and special characters.
-   - If `code` is not available (command fails), skip gracefully and tell the user the spec file path instead.
+1. Tell the user the spec file path so they can open it and click through the Suggested Review Order. Display the path in CWD-relative format for terminal clickability. Do NOT run `code` CLI commands — `code -r` causes destructive workspace reloads in multi-window setups.
 2. Display a summary in conversation output, including:
    - The commit hash (if one was created).
    - List of files changed with one-line descriptions. Any file paths shown in conversation/terminal output must use CWD-relative format (no leading `/`) with `:line` notation (e.g., `src/path/file.ts:42`) for terminal clickability — this differs from spec-file links which use spec-file-relative paths.
