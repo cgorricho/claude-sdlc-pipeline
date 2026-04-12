@@ -23,7 +23,6 @@ Exit codes:
     3 — Automation paused — human judgment required (Mode B / [DESIGN] escalation)
 """
 
-import argparse
 import json
 import logging
 import re
@@ -60,49 +59,38 @@ from claude_sdlc.prompts import (
 from claude_sdlc.run_log import RunLog, StepLog, StepStatus
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Automate BMAD story cycle (Phase 2: hardened pipeline)"
-    )
-    parser.add_argument("--story", required=True, help="Story key, e.g. '1-3'")
-    parser.add_argument("--skip-create", action="store_true",
-                        help="Skip create-story (story file already exists)")
-    parser.add_argument("--skip-trace", action="store_true",
-                        help="Skip optional trace workflow")
-    parser.add_argument("--review-mode", choices=["A", "B"], default=None,
-                        help="Override review mode (default: auto-select)")
-    parser.add_argument("--resume", action="store_true",
-                        help="Resume from last paused/failed step")
-    parser.add_argument("--resume-from", choices=PIPELINE_STEPS, default=None,
-                        help="Resume from a specific step")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print what would run without executing")
-    parser.add_argument("--clean", action="store_true",
-                        help="Stash uncommitted changes before starting (git stash)")
-    parser.add_argument("-v", "--verbose", action="store_true",
-                        help="Stream full Claude output to terminal in real time")
-    args = parser.parse_args()
-
-    story_key = args.story
+def run_pipeline(
+    story_key: str,
+    *,
+    skip_create: bool = False,
+    skip_trace: bool = False,
+    resume: bool = False,
+    resume_from: str | None = None,
+    review_mode: str | None = None,
+    dry_run: bool = False,
+    clean: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Execute the full BMAD story pipeline for a single story."""
     now = datetime.now()
     dir_timestamp = now.strftime("%Y-%m-%dT%H-%M-%S")   # File-safe (for directory names)
     iso_timestamp = now.isoformat()                       # Proper ISO (for run_log)
 
     # ── Scoped clean (Phase 2 spec 4.7) ────────────────────────────
-    if args.clean:
+    if clean:
         _scoped_clean(story_key, iso_timestamp)
 
     # ── Resume or new run ──────────────────────────────────────────
-    if args.resume or args.resume_from:
+    if resume or resume_from:
         run_dir = find_latest_run(story_key)
         if not run_dir:
-            if args.resume:
+            if resume:
                 print(f"ERROR: No previous run found for story {story_key}",
                       file=sys.stderr)
                 sys.exit(1)
             # --resume-from without existing run: start fresh from that step
             run_dir = RUNS_DIR / f"{dir_timestamp}_{story_key}"
-            if not args.dry_run:
+            if not dry_run:
                 run_dir.mkdir(parents=True, exist_ok=True)
             run_log = RunLog(
                 story=story_key,
@@ -110,7 +98,7 @@ def main():
                 dev_model=DEV_MODEL,
                 review_model=REVIEW_MODEL,
             )
-            start_from = args.resume_from
+            start_from = resume_from
         elif (run_dir / "run_log.yaml").exists():
             # Phase 2 (spec 4.6.1): validate schema on load
             try:
@@ -134,10 +122,10 @@ def main():
                 print(f"ERROR: Failed to load run_log.yaml: {e}", file=sys.stderr)
                 print(f"  Run directory: {run_dir}", file=sys.stderr)
                 print(f"  Consider starting fresh: python automation/auto_story.py "
-                      f"--story {story_key} --resume-from {args.resume_from or 'create-story'}",
+                      f"--story {story_key} --resume-from {resume_from or 'create-story'}",
                       file=sys.stderr)
                 sys.exit(1)
-            start_from = args.resume_from or determine_resume_step(run_log)
+            start_from = resume_from or determine_resume_step(run_log)
         else:
             # Phase 2 (spec 4.6.3): run dir exists but no run_log — reconstruct
             run_log = RunLog(
@@ -147,7 +135,7 @@ def main():
                 review_model=REVIEW_MODEL,
                 recovered=True,
             )
-            start_from = args.resume_from or "create-story"
+            start_from = resume_from or "create-story"
             print(f"  NOTE: Run log missing, reconstructed with recovered=True")
         # Guard against legacy run logs with review_mode: C
         if run_log.review_mode not in ("A", "B"):
@@ -164,7 +152,7 @@ def main():
         print(f"  Run directory: {run_dir}")
     else:
         run_dir = RUNS_DIR / f"{dir_timestamp}_{story_key}"
-        if not args.dry_run:
+        if not dry_run:
             run_dir.mkdir(parents=True, exist_ok=True)
         run_log = RunLog(
             story=story_key,
@@ -180,24 +168,24 @@ def main():
     run_log_path = run_dir / "run_log.yaml"
 
     # ── Set up logging ────────────────────────────────────────────
-    setup_logging(run_dir, verbose=args.verbose, dry_run=args.dry_run)
+    setup_logging(run_dir, verbose=verbose, dry_run=dry_run)
     log = logging.getLogger("claude_sdlc.orchestrator")
 
-    if args.dry_run:
+    if dry_run:
         print("\n=== DRY RUN ===")
         print(f"Story: {story_key}")
         print(f"Start from: {start_from}")
         print(f"Steps to run:")
         for step in PIPELINE_STEPS:
-            skip = (step == "create-story" and args.skip_create) or \
-                   (step == "trace" and args.skip_trace)
+            skip = (step == "create-story" and skip_create) or \
+                   (step == "trace" and skip_trace)
             will_run = should_run_step(step, start_from, skip)
             marker = "  SKIP" if not will_run else "  RUN "
             print(f"  {marker}  {step}")
         sys.exit(0)
 
     # ── STEP 1: Create Story ──────────────────────────────────────
-    if should_run_step("create-story", start_from, args.skip_create):
+    if should_run_step("create-story", start_from, skip_create):
         status = read_sprint_status(SPRINT_STATUS)
         current = get_story_status(status, story_key)
 
@@ -220,7 +208,7 @@ def main():
                 DEV_MODEL,
                 run_dir / "01-create-story.stdout.md",
                 PROJECT_ROOT,
-                verbose=args.verbose,
+                verbose=verbose,
             )
             log.debug(f"Claude exit code: {exit_code}")
 
@@ -248,7 +236,7 @@ def main():
         story_type = read_story_type(story_file)
         story_tags = read_story_tags(story_file)
         run_log.story_type = story_type
-        run_log.review_mode = select_review_mode(story_tags, args.review_mode)
+        run_log.review_mode = select_review_mode(story_tags, review_mode)
         log.info(f"  Story type: {story_type} | Review mode: {run_log.review_mode}")
         if story_tags:
             log.info(f"  Tags: {', '.join(story_tags)}")
@@ -274,7 +262,7 @@ def main():
             DEV_MODEL,
             run_dir / "02-dev-story.stdout.md",
             PROJECT_ROOT,
-            verbose=args.verbose,
+            verbose=verbose,
         )
         log.debug(f"Claude exit code: {exit_code}")
 
@@ -335,7 +323,7 @@ def main():
             sys.exit(1)
 
         # Phase 2 (spec 4.5.2): On resume, re-verify before proceeding
-        if args.resume or args.resume_from:
+        if resume or resume_from:
             log.info("  Re-verifying build+test before code review (resume path)...")
             stale_results = run_dir / "test-results.json"
             if stale_results.exists():
@@ -359,7 +347,7 @@ def main():
             # (manual fallback), skip Codex and consume human findings directly.
             prior_step = run_log.find_step("code-review")
             is_manual_fallback_resume = (
-                (args.resume or args.resume_from)
+                (resume or resume_from)
                 and prior_step
                 and prior_step.status == str(StepStatus.PAUSED)
                 and prior_step.escalation.get("reason", "").startswith("Codex failure")
@@ -646,7 +634,7 @@ def main():
                 REVIEW_MODEL,
                 run_dir / f"03-code-review{suffix}.stdout.md",
                 PROJECT_ROOT,
-                verbose=args.verbose,
+                verbose=verbose,
             )
             log.debug(f"Claude exit code: {exit_code}")
 
@@ -754,7 +742,7 @@ def main():
                     DEV_MODEL,
                     run_dir / f"02-dev-story.retry{attempt}.stdout.md",
                     PROJECT_ROOT,
-                    verbose=args.verbose,
+                    verbose=verbose,
                 )
 
                 # Re-verify
@@ -786,9 +774,9 @@ def main():
             sys.exit(1)
 
     # ── STEP 4: Trace (optional) ──────────────────────────────────
-    if should_run_step("trace", start_from, args.skip_trace):
+    if should_run_step("trace", start_from, skip_trace):
         # Phase 2 (spec 4.5.2): Re-verify on resume before trace
-        if args.resume or args.resume_from:
+        if resume or resume_from:
             log.info("  Re-verifying build+test before trace (resume path)...")
             stale_results = run_dir / "test-results.json"
             if stale_results.exists():
@@ -823,7 +811,7 @@ def main():
             DEV_MODEL,
             run_dir / "04-trace.stdout.md",
             PROJECT_ROOT,
-            verbose=args.verbose,
+            verbose=verbose,
         )
         log.debug(f"Claude exit code: {exit_code}")
 
@@ -854,7 +842,7 @@ def main():
 
         run_log.save(run_log_path)
         log.info(f"  trace completed ✓ ({step_log.duration_seconds}s)")
-    elif args.skip_trace:
+    elif skip_trace:
         log.info("Step 4/4: Skipping trace (--skip-trace)")
 
     # ── DONE ──────────────────────────────────────────────────────
@@ -876,6 +864,13 @@ def main():
     log.info(f"  Steps:          {len(run_log.steps)} completed")
     interventions = run_log.human_interventions
     log.info(f"  Interventions:  planned={interventions.planned}, unplanned={interventions.unplanned}")
+
+
+def main(story_key=None, **kwargs):
+    """Legacy entry -- delegates to run_pipeline(). Use 'csdlc run' instead."""
+    if story_key is None:
+        raise TypeError("main() requires story_key as first argument. Use 'csdlc run' instead.")
+    run_pipeline(story_key, **kwargs)
 
 
 # ── Helper functions ──────────────────────────────────────────────
@@ -1250,6 +1245,3 @@ def generate_escalation_doc(path: Path, story_key: str, findings: dict,
         yaml.dump(escalation, f, default_flow_style=False, sort_keys=False)
         f.write("---\n")
 
-
-if __name__ == "__main__":
-    main()
