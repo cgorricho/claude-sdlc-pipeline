@@ -1,0 +1,60 @@
+project:
+  root: ..
+  name: claude-sdlc-pipeline
+
+paths:
+  sprint_status: _bmad-output/implementation-artifacts/sprint-status.yaml
+  impl_artifacts: _bmad-output/implementation-artifacts
+  planning_artifacts: _bmad-output/planning-artifacts
+  test_artifacts: _bmad-output/test-artifacts
+  runs: .csdlc/runs
+
+models:
+  dev: opus
+  review: sonnet
+
+claude:
+  bin: claude
+  prompt_max_chars: 20000
+  prompt_warning_chars: 15000
+
+codex:
+  bin: codex
+  timeout: 600
+
+build:
+  command: "echo 'no build step'"
+  timeout: 300
+
+test:
+  command: pytest
+  reporter_args: ["--tb=short", "--junitxml={runs_dir}/test-results.xml"]
+  timeout: 300
+
+timeouts:
+  create-story: 600
+  dev-story: 1200
+  code-review: 900
+  trace: 600
+
+workflows:
+  create-story: /bmad-bmm-create-story
+  dev-story: /bmad-bmm-dev-story
+  code-review: /bmad-bmm-code-review
+  trace: /bmad-tea-testarch-trace
+
+review:
+  default_mode: A
+  max_retries: 2
+  extra_inference_keywords: {}
+
+safety:
+  architectural_paths: ["*/schema/*", "*/migrations/*"]
+  max_fix_files: 3
+
+story:
+  types: [scaffold, feature, refactor, bugfix]
+  default_type: feature
+  pipeline_steps: [create-story, dev-story, code-review, trace]
+
+plugins: []
