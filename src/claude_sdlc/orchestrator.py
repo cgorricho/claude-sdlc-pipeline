@@ -40,6 +40,7 @@ from claude_sdlc.contracts import (
     validate_dev_story,
     validate_trace,
 )
+from claude_sdlc.plugins import load_plugins
 from claude_sdlc.prompts import (
     code_review_prompt,
     codex_review_prompt,
@@ -299,7 +300,14 @@ def run_pipeline(
             fail_step(run_log, step_log, run_log_path,
                       f"Contract violation: {result.error}")
 
-        # Plugin hook: pre_review_checks (see Story 5)
+        # Plugin hook: pre_review_checks
+        plugins = load_plugins(config)
+        for plugin in plugins:
+            log.info(f"  Running plugin: {plugin.name}")
+            check = plugin.run(story_key, config)
+            if not check.passed:
+                fail_step(run_log, step_log, run_log_path,
+                          f"Plugin {plugin.name}: {check.message}")
 
         # Phase 2 (spec 4.3): Check for sprint-status gap and pipeline-own the transition
         has_status_gap = check_dev_story_status_gap(story_key, sprint_status)

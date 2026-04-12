@@ -267,6 +267,26 @@ def validate():
             click.echo(f"[FAIL] Build command: '{build_parts[0]}' not found on PATH")
             all_passed = False
 
+    # Check 4: Plugin entry points resolve
+    plugin_names = (raw.get("plugins") if raw else None) or []
+    if not plugin_names:
+        click.echo("[PASS] Plugins: none configured")
+    else:
+        import importlib.metadata
+        eps = importlib.metadata.entry_points(group="claude_sdlc.plugins")
+        ep_map = {ep.name: ep for ep in eps}
+        for name in plugin_names:
+            if name in ep_map:
+                try:
+                    ep_map[name].load()
+                    click.echo(f"[PASS] Plugin: '{name}' resolves and loads")
+                except Exception as e:
+                    click.echo(f"[FAIL] Plugin: '{name}' entry point found but failed to load ({e})")
+                    all_passed = False
+            else:
+                click.echo(f"[FAIL] Plugin: '{name}' not found in claude_sdlc.plugins entry points")
+                all_passed = False
+
     # Summary
     if all_passed:
         click.echo("\nAll checks passed.")
