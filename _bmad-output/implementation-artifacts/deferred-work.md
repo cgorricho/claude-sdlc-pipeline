@@ -16,3 +16,7 @@
 ## From Story 6 — Prompt, Runner, State & Contract Sanitization
 
 - **Duplicated `_PIPELINE_STEPS` in cli.py**: `cli.py` defines `_PIPELINE_STEPS` as a local list identical to `StoryConfig.pipeline_steps` defaults. Click decorators need import-time constants, so this can't read from Config. Add a test assertion that `_PIPELINE_STEPS == Config().story.pipeline_steps` to catch drift.
+
+## From Story 7 — README & Documentation
+
+- **Document `--resume` vs `--resume-from` interaction**: README doesn't clarify how `--resume` and `--resume-from` interact when both are specified, or that `--resume-from` can start a fresh run if no prior run exists. Requires reading orchestrator resume logic to document accurately.
