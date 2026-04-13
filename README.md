@@ -1,8 +1,12 @@
 # claude-sdlc-pipeline
 
-Automate your Claude Code SDLC — from story creation through code review and traceability, with contract validation and audit trails.
+Automate the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) story development cycle with Claude Code — from story creation through code review and traceability, with contract validation and audit trails.
 
-`claude-sdlc-pipeline` orchestrates Claude Code sessions through a 4-step software development lifecycle: **create-story**, **dev-story**, **code-review**, and **trace**. It replaces manual prompt-and-paste workflows with a repeatable, auditable pipeline that validates contracts at every step, selects the right review mode automatically, and produces traceability reports.
+`claude-sdlc-pipeline` orchestrates Claude Code sessions through the BMAD Method's per-story development lifecycle. The BMAD Method structures AI-assisted software development into disciplined workflows — this pipeline automates the execution of those workflows so you don't have to invoke each one manually.
+
+The default pipeline runs 4 BMAD workflow steps per story: **create-story** (`/bmad-bmm-create-story`), **dev-story** (`/bmad-bmm-dev-story`), **code-review** (`/bmad-bmm-code-review`), and **trace** (`/bmad-tea-testarch-trace`). It validates contracts at every step, selects the right review mode automatically, and produces traceability reports.
+
+**Requires:** A project with [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) installed and configured (skills, epics, sprint status).
 
 ## Install
 
@@ -20,7 +24,7 @@ pip install -e ".[dev]"
 pip install claude-sdlc-pipeline
 ```
 
-**Requirements:** Python 3.11+, [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) on PATH.
+**Requirements:** Python 3.11+, [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) on PATH, [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) installed in your target project.
 
 ## Quickstart
 
@@ -94,29 +98,29 @@ Print the installed version.
 
 ## Pipeline Steps
 
-The pipeline executes 4 steps sequentially for each story:
+The pipeline executes [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) workflows sequentially for each story. Each step invokes a BMAD skill in a fresh Claude Code session:
 
-### 1. create-story
+### 1. create-story (`/bmad-bmm-create-story`)
 
-Generates a story file and updates sprint status. Claude reads the sprint status, confirms the story is in `backlog`, and produces a structured story file with acceptance criteria.
+Generates a story file and updates sprint status. Claude reads the sprint status, confirms the story is in `backlog`, and produces a structured story file with acceptance criteria, tasks, and dev notes following the BMAD story spec format.
 
 **Contract:** Story file created, sprint status updated to `ready-for-dev`.
 
-### 2. dev-story
+### 2. dev-story (`/bmad-bmm-dev-story`)
 
-Implements the story. Claude reads the story file, extracts referenced documentation, and writes code. After implementation, the pipeline independently verifies the build and runs tests outside the Claude session. Pre-review plugins execute at this point.
+Implements the story following the BMAD red-green-refactor development workflow. Claude reads the story file, extracts referenced documentation, and writes code. After implementation, the pipeline independently verifies the build and runs tests outside the Claude session (AD-2: independent verification). Pre-review plugins execute at this point.
 
 **Contract:** Build succeeds, tests pass, all plugin checks pass.
 
-### 3. code-review
+### 3. code-review (`/bmad-bmm-code-review`)
 
-Reviews implemented code. Mode A (automated) or Mode B (hybrid) — see [Review Modes](#review-modes) below. Findings are classified as `[FIX]` (auto-correctable) or `[DESIGN]` (requires human judgment).
+Reviews implemented code using the BMAD adversarial review workflow. Mode A (automated) or Mode B (hybrid) — see [Review Modes](#review-modes) below. Findings are classified as `[FIX]` (auto-correctable) or `[DESIGN]` (requires human judgment).
 
 **Contract:** Mode A completes autonomously or escalates. Mode B always involves human review.
 
-### 4. trace
+### 4. trace (`/bmad-tea-testarch-trace`)
 
-Generates a traceability report linking story requirements to implementation and test coverage. Updates sprint status to `done`.
+Runs the BMAD Test Architecture Enterprise (TEA) traceability workflow — generates a traceability matrix linking story requirements to implementation and test coverage. Issues a quality gate decision (PASS/CONCERNS/FAIL/WAIVED). Updates sprint status to `done`.
 
 **Contract:** Traceability report created in test artifacts directory.
 
@@ -256,7 +260,7 @@ Per-step Claude session timeouts in seconds.
 
 ### `workflows`
 
-BMAD skill names invoked for each pipeline step.
+[BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) skill names invoked for each pipeline step. These must match the BMAD skills installed in your target project.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -356,6 +360,17 @@ plugins:
 
 The pipeline loads plugins by matching names from `config.plugins` against the `claude_sdlc.plugins` entry point group using `importlib.metadata.entry_points()`. Unresolvable or non-conforming plugins log a warning and are skipped.
 
+## About the BMAD Method
+
+This pipeline automates the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) — a structured approach to AI-assisted software development that organizes work into epics, stories, and disciplined workflows for planning, implementation, review, and testing.
+
+BMAD provides the workflow definitions (skills) that this pipeline orchestrates. Without BMAD installed in your target project, the pipeline has nothing to invoke.
+
+**Key BMAD resources:**
+- [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) — core framework
+- [BMAD Method Docs](https://docs.bmad-method.org) — documentation
+- [Test Architecture Enterprise (TEA)](https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise) — testing module used by the trace step
+
 ## Migration Guide
 
 For projects currently using the embedded `automation/` directory (e.g. the original Who Else Is Here project):
@@ -392,7 +407,7 @@ For projects currently using the embedded `automation/` directory (e.g. the orig
 
 ### What Changes
 
-- Pipeline behavior is identical — same 4-step flow, same contract validation, same review mode logic
+- Pipeline behavior is identical — same 4-step BMAD workflow cycle, same contract validation, same review mode logic
 - Drizzle drift check is now opt-in via the `plugins:` config key (previously hardcoded)
 - Configuration moves from hardcoded constants to `.csdlc/config.yaml`
 - All commands go through the `csdlc` CLI instead of direct Python script invocation
@@ -400,3 +415,7 @@ For projects currently using the embedded `automation/` directory (e.g. the orig
 ## License
 
 MIT
+
+## Acknowledgments
+
+Built on the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) by [BMad Code](https://github.com/bmad-code-org).
