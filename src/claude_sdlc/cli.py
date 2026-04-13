@@ -12,7 +12,10 @@ import click
 import yaml
 
 from claude_sdlc import __version__
-from claude_sdlc.config import PIPELINE_STEPS
+
+# Core invariant — pipeline step names used for Click choices at import time.
+# Matches Config.story.pipeline_steps defaults (not user-configurable).
+_PIPELINE_STEPS = ["create-story", "dev-story", "code-review", "trace"]
 
 # ---------------------------------------------------------------------------
 # Project type detection for `csdlc init`
@@ -79,7 +82,7 @@ def main():
               default=None, help="Override review mode (default: auto-select)")
 @click.option("--resume", is_flag=True, default=False,
               help="Resume from last paused/failed step")
-@click.option("--resume-from", type=click.Choice(PIPELINE_STEPS, case_sensitive=True),
+@click.option("--resume-from", type=click.Choice(_PIPELINE_STEPS, case_sensitive=True),
               default=None, help="Resume from a specific step")
 @click.option("--dry-run", is_flag=True, default=False,
               help="Print what would run without executing")

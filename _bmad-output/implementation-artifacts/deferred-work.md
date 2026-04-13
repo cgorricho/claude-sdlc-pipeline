@@ -12,3 +12,7 @@
 ## From Story 4 — Orchestrator Extraction
 
 - **Trailing slash inconsistency in `glob_implementation_files` startswith check**: `f.startswith(d)` where `d` comes from `config.project.source_dirs` can match unintended prefixes (e.g. `source_dirs=["packages"]` matches `packagesX/`). Should use `f.startswith(d.rstrip("/") + "/")` or enforce trailing slashes in config validation.
+
+## From Story 6 — Prompt, Runner, State & Contract Sanitization
+
+- **Duplicated `_PIPELINE_STEPS` in cli.py**: `cli.py` defines `_PIPELINE_STEPS` as a local list identical to `StoryConfig.pipeline_steps` defaults. Click decorators need import-time constants, so this can't read from Config. Add a test assertion that `_PIPELINE_STEPS == Config().story.pipeline_steps` to catch drift.

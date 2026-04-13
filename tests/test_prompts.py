@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from claude_sdlc.config import Config
 from claude_sdlc.prompts import (
     measure_prompt,
     build_prompt_with_budget,
@@ -21,6 +22,12 @@ from claude_sdlc.prompts import (
     _build_security_checklist,
     trace_prompt,
 )
+
+
+@pytest.fixture
+def default_config():
+    """Default Config instance for testing."""
+    return Config()
 
 
 class TestMeasurePrompt:
@@ -40,27 +47,30 @@ class TestMeasurePrompt:
 
 
 class TestBuildPromptWithBudget:
-    def test_within_budget(self):
+    def test_within_budget(self, default_config):
         result = build_prompt_with_budget(
             "template",
             {"ctx1": "short content"},
+            default_config,
             max_chars=1000,
         )
         assert "ctx1" in result
         assert "short content" in result
 
-    def test_truncation(self):
+    def test_truncation(self, default_config):
         result = build_prompt_with_budget(
             "template",
             {"ctx1": "x" * 100, "ctx2": "y" * 100},
+            default_config,
             max_chars=50,
         )
         assert "TRUNCATED" in result
 
-    def test_ordering_preserved(self):
+    def test_ordering_preserved(self, default_config):
         result = build_prompt_with_budget(
             "template",
             {"first": "aaa", "second": "bbb"},
+            default_config,
             max_chars=10000,
         )
         assert result.index("first") < result.index("second")
@@ -71,22 +81,24 @@ class TestExtractReferencedSections:
         doc = tmp_path / "architecture.md"
         doc.write_text("\n".join([f"Line {i}" for i in range(1, 20)]))
         story = f"See {doc.name} lines 5-7"
-        with pytest.MonkeyPatch.context() as m:
-            m.setattr("prompts.PLANNING_ARTIFACTS", tmp_path)
-            result = extract_referenced_sections(story)
+        config = Config(paths=Config.__dataclass_fields__["paths"].default_factory())
+        # Override paths to use tmp_path
+        from claude_sdlc.config import PathsConfig
+        config = Config(paths=PathsConfig(planning_artifacts=str(tmp_path)))
+        result = extract_referenced_sections(story, config)
         assert len(result) == 1
         key = list(result.keys())[0]
         assert "lines 5-7" in key
 
-    def test_no_refs(self):
-        result = extract_referenced_sections("No references here.")
+    def test_no_refs(self, default_config):
+        result = extract_referenced_sections("No references here.", default_config)
         assert result == {}
 
     def test_missing_file_skipped(self, tmp_path):
         story = "See nonexistent.md lines 1-5"
-        with pytest.MonkeyPatch.context() as m:
-            m.setattr("prompts.PLANNING_ARTIFACTS", tmp_path)
-            result = extract_referenced_sections(story)
+        from claude_sdlc.config import PathsConfig
+        config = Config(paths=PathsConfig(planning_artifacts=str(tmp_path)))
+        result = extract_referenced_sections(story, config)
         assert result == {}
 
 
@@ -116,97 +128,103 @@ class TestExtractSectionByHeader:
 
 
 class TestCreateStoryPrompt:
-    def test_contains_command(self):
-        prompt = create_story_prompt("2-1")
-        assert "/bmad-bmm-create-story" in prompt
+    def test_contains_command(self, default_config):
+        prompt = create_story_prompt("2-1", default_config)
+        assert default_config.workflows["create-story"] in prompt
         assert "2-1" in prompt
+
+    def test_custom_workflow(self):
+        config = Config(workflows={"create-story": "/custom-create", "dev-story": "", "code-review": "", "trace": ""})
+        prompt = create_story_prompt("1-1", config)
+        assert "/custom-create" in prompt
 
 
 class TestDevStoryPrompt:
-    def test_basic(self):
-        prompt = dev_story_prompt("/path/to/story.md")
-        assert "/bmad-bmm-dev-story" in prompt
+    def test_basic(self, default_config):
+        prompt = dev_story_prompt("/path/to/story.md", default_config)
+        assert default_config.workflows["dev-story"] in prompt
         assert "/path/to/story.md" in prompt
 
-    def test_with_context(self):
-        prompt = dev_story_prompt("/path/story.md", "extra context here")
+    def test_with_context(self, default_config):
+        prompt = dev_story_prompt("/path/story.md", default_config, "extra context here")
         assert "extra context here" in prompt
 
 
 class TestCodeReviewPrompt:
-    def test_contains_sections(self):
+    def test_contains_sections(self, default_config):
         prompt = code_review_prompt(
             "/path/story.md",
             file_inventory="src/app.ts\nsrc/util.ts",
             test_summary='{"total": 10}',
+            config=default_config,
         )
-        assert "/bmad-bmm-code-review" in prompt
+        assert default_config.workflows["code-review"] in prompt
         assert "src/app.ts" in prompt
         assert '"total": 10' in prompt
 
 
 class TestModeBCursorPrompt:
-    def test_basic_structure(self):
+    def test_basic_structure(self, default_config):
         prompt = mode_b_cursor_prompt(
-            "2-1", "/path/story.md", "file1.ts", "{}",
+            "2-1", "/path/story.md", "file1.ts", "{}", default_config,
         )
         assert "Mode B" in prompt
         assert "General Quality" in prompt
         assert "2-1" in prompt
 
-    def test_auth_tag_checklist(self):
+    def test_auth_tag_checklist(self, default_config):
         prompt = mode_b_cursor_prompt(
-            "2-1", "/path/story.md", "file1.ts", "{}",
+            "2-1", "/path/story.md", "file1.ts", "{}", default_config,
             story_tags={"auth"},
         )
         assert "Authentication & Security" in prompt
         assert "OWASP" in prompt
 
-    def test_data_isolation_tag(self):
+    def test_data_isolation_tag(self, default_config):
         prompt = mode_b_cursor_prompt(
-            "2-1", "/path/story.md", "file1.ts", "{}",
+            "2-1", "/path/story.md", "file1.ts", "{}", default_config,
             story_tags={"data-isolation"},
         )
         assert "Data Isolation" in prompt
         assert "Journey/Event Integrity" in prompt
 
-    def test_security_and_rbac(self):
+    def test_security_and_rbac(self, default_config):
         prompt = mode_b_cursor_prompt(
-            "2-1", "/path/story.md", "file1.ts", "{}",
+            "2-1", "/path/story.md", "file1.ts", "{}", default_config,
             story_tags={"security", "rbac"},
         )
         assert "Authentication & Security" in prompt
         assert "Data Isolation & Access Control" in prompt
 
-    def test_contains_cursor_framing(self):
+    def test_contains_cursor_framing(self, default_config):
         """Cursor prompt MUST contain Cursor-specific language."""
         prompt = mode_b_cursor_prompt(
-            "2-1", "/path/story.md", "file1.ts", "{}",
+            "2-1", "/path/story.md", "file1.ts", "{}", default_config,
         )
         assert "Cross-Tool Review" in prompt
 
 
 class TestCodexReviewPrompt:
-    def test_basic_structure(self):
+    def test_basic_structure(self, default_config):
         prompt = codex_review_prompt(
-            "2-1", "/path/story.md", "file1.ts", "{}",
+            "2-1", "/path/story.md", "file1.ts", "{}", default_config,
         )
         assert "Adversarial Code Review" in prompt
         assert "General Quality" in prompt
         assert "2-1" in prompt
 
-    def test_no_cursor_framing(self):
+    def test_no_cursor_framing(self, default_config):
         """Codex prompt must NOT contain Cursor-specific language."""
         prompt = codex_review_prompt(
-            "2-1", "/path/story.md", "file1.ts", "{}",
+            "2-1", "/path/story.md", "file1.ts", "{}", default_config,
             story_tags={"security"},
         )
         assert "Cursor" not in prompt
         assert "paste" not in prompt.lower()
 
-    def test_tag_specific_checklist(self):
+    def test_tag_specific_checklist(self, default_config):
         prompt = codex_review_prompt(
-            "2-1", "/path/story.md", "file1.ts", "{}",
+            "2-1", "/path/story.md", "file1.ts", "{}", default_config,
             story_tags={"auth", "data-isolation"},
         )
         assert "Authentication & Security" in prompt
@@ -231,11 +249,11 @@ class TestBuildSecurityChecklist:
         assert "Data Isolation" in checklist
         assert "Journey/Event Integrity" in checklist
 
-    def test_shared_content_matches(self):
+    def test_shared_content_matches(self, default_config):
         """Cursor and Codex prompts should use the same checklist content."""
         tags = {"auth", "data-isolation"}
-        cursor = mode_b_cursor_prompt("2-1", "/p", "f", "{}", story_tags=tags)
-        codex = codex_review_prompt("2-1", "/p", "f", "{}", story_tags=tags)
+        cursor = mode_b_cursor_prompt("2-1", "/p", "f", "{}", default_config, story_tags=tags)
+        codex = codex_review_prompt("2-1", "/p", "f", "{}", default_config, story_tags=tags)
         checklist = _build_security_checklist(tags)
         # Both should contain the full checklist
         assert checklist in cursor
@@ -243,19 +261,24 @@ class TestBuildSecurityChecklist:
 
 
 class TestModeBResumeInstructions:
-    def test_contains_story_key(self):
-        result = mode_b_resume_instructions("2-1", "/run/dir")
+    def test_contains_story_key(self, default_config):
+        result = mode_b_resume_instructions("2-1", "/run/dir", default_config)
         assert "2-1" in result
         assert "--resume" in result
 
+    def test_uses_config_commands(self, default_config):
+        result = mode_b_resume_instructions("2-1", "/run/dir", default_config)
+        assert default_config.build.command in result
+        assert default_config.test.command in result
+
 
 class TestTracePrompt:
-    def test_compact_format(self):
-        prompt = trace_prompt("2-1", "feature", "{}", format="compact")
-        assert "/bmad-tea-testarch-trace" in prompt
+    def test_compact_format(self, default_config):
+        prompt = trace_prompt("2-1", "feature", "{}", default_config, format="compact")
+        assert default_config.workflows["trace"] in prompt
         assert "2-1" in prompt
         assert "Coverage Summary" in prompt
 
-    def test_contains_story_type(self):
-        prompt = trace_prompt("2-1", "scaffold", "{}")
+    def test_contains_story_type(self, default_config):
+        prompt = trace_prompt("2-1", "scaffold", "{}", default_config)
         assert "scaffold" in prompt

@@ -9,7 +9,7 @@ import re
 import yaml
 from pathlib import Path
 
-from claude_sdlc.config import STORY_TYPES, DEFAULT_STORY_TYPE, INFERENCE_KEYWORD_MAP
+from claude_sdlc.config import Config
 
 
 def read_sprint_status(path: Path) -> dict:
@@ -42,32 +42,32 @@ def read_story_status(story_path: Path) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def read_story_type(story_path: Path) -> str:
-    """Read the Type field from a story .md file. Defaults to 'feature'."""
+def read_story_type(story_path: Path, config: Config) -> str:
+    """Read the Type field from a story .md file. Defaults to config default."""
     text = story_path.read_text()
     match = re.search(r"^Type:\s*(.+)$", text, re.MULTILINE)
     if match:
         story_type = match.group(1).strip().lower()
-        if story_type in STORY_TYPES:
+        if story_type in set(config.story.types):
             return story_type
-    return DEFAULT_STORY_TYPE
+    return config.story.default_type
 
 
-def infer_tags_from_content(text: str) -> set[str]:
+def infer_tags_from_content(text: str, config: Config) -> set[str]:
     """Infer MODE_B_TAGS from story content when Tags: field is absent.
 
-    Scans for keywords in INFERENCE_KEYWORD_MAP (case-insensitive substring match).
+    Scans for keywords in config.inference_keyword_map (case-insensitive substring match).
     Returns set of canonical tag names.
     """
     text_lower = text.lower()
     tags: set[str] = set()
-    for keyword, canonical_tag in INFERENCE_KEYWORD_MAP.items():
+    for keyword, canonical_tag in config.inference_keyword_map.items():
         if keyword in text_lower:
             tags.add(canonical_tag)
     return tags
 
 
-def read_story_tags(story_path: Path) -> set[str]:
+def read_story_tags(story_path: Path, config: Config) -> set[str]:
     """Read Tags field from story file. Returns set of lowercase tags.
 
     Falls back to content-based inference when Tags: field is absent (P11 fix).
@@ -77,7 +77,7 @@ def read_story_tags(story_path: Path) -> set[str]:
     match = re.search(r"^Tags:\s*(.+)$", text, re.MULTILINE)
     if match:
         return {t.strip().lower() for t in match.group(1).split(",")}
-    return infer_tags_from_content(text)
+    return infer_tags_from_content(text, config)
 
 
 def update_story_status(sprint_status_path: Path, story_key: str, new_status: str):

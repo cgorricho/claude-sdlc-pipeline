@@ -102,8 +102,8 @@ def validate_dev_story(story_key: str, sprint_status_path: Path,
     The hard requirements are build + test passing.
 
     Contract:
-      - Independent build passes (npm run build exits 0)
-      - Independent tests pass (vitest exits 0)
+      - Independent build passes (build command exits 0)
+      - Independent tests pass (test command exits 0)
       - sprint-status check is advisory (logged but not a gate)
     """
     if not build_passed:

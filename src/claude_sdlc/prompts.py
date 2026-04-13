@@ -1,14 +1,14 @@
 """
 prompts.py — Prompt templates and reference extraction.
 
-Core principle: Commands, not prompts (AD-1). Prompts issue /bmad-bmm-*
+Core principle: Commands, not prompts (AD-1). Prompts issue workflow
 skill commands directly with parameters. They do NOT set agent personas.
 """
 
 import re
 from pathlib import Path
 
-from claude_sdlc.config import PLANNING_ARTIFACTS, MAX_PROMPT_CHARS
+from claude_sdlc.config import Config
 
 
 # ── Compact trace template (Section 12) ─────────────────────────────
@@ -45,7 +45,7 @@ Type-specific adjustments
 
 # ── Reference extraction ────────────────────────────────────────────
 
-def extract_referenced_sections(story_text: str) -> dict[str, str]:
+def extract_referenced_sections(story_text: str, config: Config) -> dict[str, str]:
     """Parse story file for document references and extract relevant sections.
 
     Looks for patterns like:
@@ -54,13 +54,14 @@ def extract_referenced_sections(story_text: str) -> dict[str, str]:
       - Per architecture.md:
     Returns dict of {doc_name: extracted_content}.
     """
+    planning_artifacts = Path(config.paths.planning_artifacts)
     refs = re.findall(
         r"(?:See|Ref:?|Per)\s+([\w-]+\.md)(?:\s+lines?\s+(\d+)-(\d+))?(?:\s+(?:§|section)\s+(.+?)(?:\n|$))?",
         story_text
     )
     sections = {}
     for filename, start_line, end_line, section_name in refs:
-        doc_path = PLANNING_ARTIFACTS / filename
+        doc_path = planning_artifacts / filename
         if not doc_path.exists():
             continue  # Skip unresolvable refs — dev agent can read files directly
         doc_text = doc_path.read_text().splitlines()
@@ -106,8 +107,10 @@ def measure_prompt(prompt: str) -> int:
 
 
 def build_prompt_with_budget(template: str, artifacts: dict[str, str],
-                             max_chars: int = MAX_PROMPT_CHARS) -> str:
+                             config: Config, max_chars: int | None = None) -> str:
     """Assemble prompt, truncating lowest-priority artifacts if budget exceeded."""
+    if max_chars is None:
+        max_chars = config.claude.prompt_max_chars
     prompt = template
     for name, content in artifacts.items():
         addition = f"\n\n## {name}\n{content}"
@@ -121,10 +124,10 @@ def build_prompt_with_budget(template: str, artifacts: dict[str, str],
 
 # ── Prompt templates (AD-1: commands, not prompts) ──────────────────
 
-def create_story_prompt(story_key: str) -> str:
+def create_story_prompt(story_key: str, config: Config) -> str:
     """Build the prompt for create-story step."""
     return f"""\
-/bmad-bmm-create-story
+{config.workflows['create-story']}
 
 Story key: {story_key}
 
@@ -133,10 +136,10 @@ ambiguity, make reasonable decisions and document them in the story file.
 """
 
 
-def dev_story_prompt(story_file_path: str, referenced_context: str = "") -> str:
+def dev_story_prompt(story_file_path: str, config: Config, referenced_context: str = "") -> str:
     """Build the prompt for dev-story step."""
     prompt = f"""\
-/bmad-bmm-dev-story
+{config.workflows['dev-story']}
 
 The story file is at: {story_file_path}
 
@@ -151,10 +154,10 @@ are complete.
 
 
 def code_review_prompt(story_file_path: str, file_inventory: str,
-                       test_summary: str, arch_excerpts: str = "") -> str:
+                       test_summary: str, config: Config, arch_excerpts: str = "") -> str:
     """Build the prompt for code-review step (Mode A)."""
     prompt = f"""\
-/bmad-bmm-code-review
+{config.workflows['code-review']}
 
 The story file is at: {story_file_path}
 
@@ -221,7 +224,7 @@ def _build_security_checklist(tags: set[str] | None = None) -> str:
 
 def mode_b_cursor_prompt(story_key: str, story_file_path: str,
                          file_inventory: str, test_summary: str,
-                         story_tags: set[str] | None = None) -> str:
+                         config: Config, story_tags: set[str] | None = None) -> str:
     """Generate the Cursor review prompt for Mode B (AD-12, D-004).
 
     This is saved as 03-code-review-cursor-prompt.md for Carlos to paste
@@ -238,7 +241,7 @@ def mode_b_cursor_prompt(story_key: str, story_file_path: str,
 {test_summary}
 ```"""
     else:
-        test_block = """(No test results available. Run `npx vitest run` to generate.)"""
+        test_block = f"""(No test results available. Run `{config.test.command}` to generate.)"""
 
     return f"""\
 # Code Review: Story {story_key} (Mode B — Cross-Tool Review)
@@ -266,13 +269,13 @@ Review these files and their direct dependencies. Focus adversarial attention on
 3. Tag each finding as [FIX] or [DESIGN]
 4. For [FIX]: describe the fix clearly
 5. For [DESIGN]: document options and affected files
-6. Save findings to: _bmad-output/implementation-artifacts/{story_key}-code-review-findings.md
+6. Save findings to: {config.paths.impl_artifacts}/{story_key}-code-review-findings.md
 """
 
 
 def codex_review_prompt(story_key: str, story_file_path: str,
                         file_inventory: str, test_summary: str,
-                        story_tags: set[str] | None = None) -> str:
+                        config: Config, story_tags: set[str] | None = None) -> str:
     """Generate the Codex adversarial review prompt for automated Mode B.
 
     Uses the same security checklist as the Cursor prompt but with Codex-appropriate
@@ -318,7 +321,7 @@ Focus adversarial attention on the story delta.
 """
 
 
-def mode_b_resume_instructions(story_key: str, run_dir: str) -> str:
+def mode_b_resume_instructions(story_key: str, run_dir: str, config: Config) -> str:
     """Generate resume instructions for Mode B (D-004).
 
     Saved as 03-code-review-resume-instructions.md.
@@ -329,21 +332,21 @@ def mode_b_resume_instructions(story_key: str, run_dir: str) -> str:
 ## After completing the Cursor cross-tool review:
 
 1. Ensure findings are saved to:
-   `_bmad-output/implementation-artifacts/{story_key}-code-review-findings.md`
+   `{config.paths.impl_artifacts}/{story_key}-code-review-findings.md`
 
 2. If fixes were applied, ensure build and tests pass:
    ```bash
-   npm run build && npx vitest run
+   {config.build.command} && {config.test.command}
    ```
 
 3. Resume the automation pipeline:
    ```bash
-   python automation/auto_story.py --story {story_key} --resume
+   csdlc run --story {story_key} --resume
    ```
 
 4. Or resume from a specific step:
    ```bash
-   python automation/auto_story.py --story {story_key} --resume-from code-review
+   csdlc run --story {story_key} --resume-from code-review
    ```
 
 ## Run directory
@@ -352,14 +355,14 @@ def mode_b_resume_instructions(story_key: str, run_dir: str) -> str:
 
 
 def trace_prompt(story_key: str, story_type: str,
-                 test_summary: str, format: str = "compact") -> str:
+                 test_summary: str, config: Config, format: str = "compact") -> str:
     """Build the prompt for trace step."""
     compact_template = ""
     if format == "compact":
         compact_template = COMPACT_TRACE_TEMPLATE
 
     return f"""\
-/bmad-tea-testarch-trace
+{config.workflows['trace']}
 
 Story: {story_key}
 Type: {story_type}

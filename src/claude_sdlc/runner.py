@@ -11,16 +11,14 @@ Core principles:
 
 import json
 import logging
+import shlex
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from claude_sdlc.config import (
-    CLAUDE_BIN, STEP_TIMEOUTS, DEFAULT_REVIEW_MODE, MODE_B_TAGS,
-    PROMPT_WARNING_CHARS, CODEX_TIMEOUT, CODEX_BIN,
-)
+from claude_sdlc.config import Config
 
 log = logging.getLogger("claude_sdlc.runner")
 
@@ -159,6 +157,7 @@ def run_workflow(
     model: str,
     log_path: Path,
     cwd: Path,
+    config: Config,
     verbose: bool = False,
 ) -> tuple[int, str]:
     """Run a single Claude session and capture output.
@@ -166,19 +165,19 @@ def run_workflow(
     Returns (exit_code, stdout_text).
     """
     cmd = [
-        CLAUDE_BIN,
+        config.claude.bin,
         "--print",
         "--dangerously-skip-permissions",
         "--model", model,
     ]
 
-    timeout = STEP_TIMEOUTS.get(workflow_name, 1800)
+    timeout = config.timeouts.get(workflow_name, 1800)
 
     # Log prompt size for context budget monitoring
     prompt_chars = len(prompt)
-    if prompt_chars > PROMPT_WARNING_CHARS:
+    if prompt_chars > config.claude.prompt_warning_chars:
         print(f"  WARNING: Prompt size {prompt_chars} chars exceeds warning threshold "
-              f"({PROMPT_WARNING_CHARS})", file=sys.stderr)
+              f"({config.claude.prompt_warning_chars})", file=sys.stderr)
 
     run_dir = log_path.parent
     result = run_with_timeout(
@@ -206,22 +205,24 @@ def run_workflow(
     return result.exit_code, log_path.read_text() if log_path.exists() else ""
 
 
-def run_build_verify(cwd: Path, output_dir: Path) -> tuple[bool, bool]:
+def run_build_verify(cwd: Path, output_dir: Path, config: Config) -> tuple[bool, bool]:
     """Run build and test independently of Claude session.
 
     Returns (build_passed, test_passed).
     """
+    build_timeout = config.build.timeout
+
     # Build
     build_result = run_with_timeout(
-        cmd=["npm", "run", "build"],
-        timeout=STEP_TIMEOUTS.get("build", 300),
+        cmd=shlex.split(config.build.command),
+        timeout=build_timeout,
         label="build",
         run_dir=output_dir,
         cwd=cwd,
     )
 
     if build_result.timed_out:
-        log.error(f"Build timed out after {STEP_TIMEOUTS.get('build', 300)}s")
+        log.error(f"Build timed out after {build_timeout}s")
         return False, False
 
     if build_result.exit_code != 0:
@@ -229,31 +230,36 @@ def run_build_verify(cwd: Path, output_dir: Path) -> tuple[bool, bool]:
         log.info(f"  Build failed. See: {build_result.output_log_path}")
         return False, False
 
-    # Test with JSON reporter
-    test_results_path = output_dir / "test-results.json"
+    # Test with reporter args from config, resolving {runs_dir} to actual output_dir
+    test_timeout = config.test.timeout
+    resolved_args = [
+        arg.replace(config.paths.runs, str(output_dir))
+        if config.paths.runs in arg else arg
+        for arg in config.test.reporter_args
+    ]
+    test_cmd = shlex.split(config.test.command) + resolved_args
     test_result = run_with_timeout(
-        cmd=["npx", "vitest", "run", "--reporter=json",
-             f"--outputFile={test_results_path}"],
-        timeout=STEP_TIMEOUTS.get("test", 300),
+        cmd=test_cmd,
+        timeout=test_timeout,
         label="test",
         run_dir=output_dir,
         cwd=cwd,
     )
 
     if test_result.timed_out:
-        log.error(f"Tests timed out after {STEP_TIMEOUTS.get('test', 300)}s")
+        log.error(f"Tests timed out after {test_timeout}s")
         return True, False
 
     return True, test_result.exit_code == 0
 
 
 def parse_test_results(path: Path) -> dict:
-    """Parse vitest JSON output into summary dict.
+    """Parse JSON test output into summary dict.
 
     Distinguishes between:
       - Valid JSON with zero tests (genuine empty test suite)
-      - Missing file (vitest may have crashed before writing output)
-      - Invalid JSON (vitest crashed mid-write)
+      - Missing file (test runner may have crashed before writing output)
+      - Invalid JSON (test runner crashed mid-write)
     """
     try:
         data = json.loads(path.read_text())
@@ -266,12 +272,12 @@ def parse_test_results(path: Path) -> dict:
     except FileNotFoundError:
         return {
             "total": 0, "passed": 0, "failed": 0, "test_files": 0,
-            "error": "test-results.json not found — vitest may have crashed",
+            "error": "test-results.json not found — test runner may have crashed",
         }
     except json.JSONDecodeError:
         return {
             "total": 0, "passed": 0, "failed": 0, "test_files": 0,
-            "error": "test-results.json is not valid JSON — vitest crashed",
+            "error": "test-results.json is not valid JSON — test runner crashed",
         }
 
 
@@ -296,6 +302,7 @@ def run_codex_review(
     run_dir: Path,
     impl_dir: Path,
     review_prompt: str,
+    config: Config,
     cwd: Path | None = None,
 ) -> RunResult:
     """Invoke Codex CLI for automated adversarial review.
@@ -311,11 +318,11 @@ def run_codex_review(
     # Finding 3 fix: capture pre-review repo state
     pre_fingerprint = _git_tree_fingerprint(cwd)
 
-    cmd = [CODEX_BIN, "review", "--base", "main"]
+    cmd = [config.codex.bin, "review", "--base", "main"]
 
     result = run_with_timeout(
         cmd=cmd,
-        timeout=CODEX_TIMEOUT,
+        timeout=config.codex.timeout,
         label="codex-review",
         run_dir=run_dir,
         cwd=cwd,
@@ -349,7 +356,7 @@ def run_codex_review(
     return result
 
 
-def select_review_mode(story_tags: set[str], cli_override: str | None) -> str:
+def select_review_mode(story_tags: set[str], cli_override: str | None, config: Config) -> str:
     """Determine review mode based on story tags and CLI flag.
 
     Returns 'A' or 'B'.
@@ -364,12 +371,12 @@ def select_review_mode(story_tags: set[str], cli_override: str | None) -> str:
             f"Valid choices: {sorted(valid_modes)}"
         )
 
-    is_security_story = bool(story_tags & MODE_B_TAGS)
+    is_security_story = bool(story_tags & config.MODE_B_TAGS)
 
     if is_security_story:
         if cli_override == "A":
             raise ValueError(
-                f"--review-mode A rejected: story has tags {story_tags & MODE_B_TAGS} "
+                f"--review-mode A rejected: story has tags {story_tags & config.MODE_B_TAGS} "
                 f"which require Mode B (mandatory, no override). See AD-12."
             )
         return "B"
@@ -377,4 +384,4 @@ def select_review_mode(story_tags: set[str], cli_override: str | None) -> str:
     if cli_override:
         return cli_override
 
-    return DEFAULT_REVIEW_MODE
+    return config.review.default_mode

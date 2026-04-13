@@ -176,8 +176,10 @@ class Config:
     story: StoryConfig = field(default_factory=StoryConfig)
     plugins: list[str] = field(default_factory=list)
 
-    # Computed at load time — merged inference keywords
-    inference_keyword_map: dict[str, str] = field(default_factory=dict)
+    # Merged inference keywords — builtins by default, extras merged by load_config()
+    inference_keyword_map: dict[str, str] = field(
+        default_factory=lambda: dict(_BUILTIN_INFERENCE_KEYWORDS)
+    )
 
     # Class-level safety constants (not configurable)
     BUILTIN_INFERENCE_KEYWORDS: dict[str, str] = field(
@@ -403,6 +405,7 @@ def load_config(path: Path) -> Config:
 # Singleton accessor
 # ---------------------------------------------------------------------------
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _config_instance: Config | None = None
 
 
@@ -431,71 +434,3 @@ def _reset_config() -> None:
     """Reset the singleton for test isolation."""
     global _config_instance
     _config_instance = None
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatible module-level aliases
-#
-# These use the same hardcoded defaults that existed before so all existing
-# imports work without change. Stories 4/6 will migrate consumers to
-# get_config(). These are NOT loaded from YAML — they are static defaults.
-# ---------------------------------------------------------------------------
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-
-PROJECT_ROOT = _PROJECT_ROOT
-SPRINT_STATUS = _PROJECT_ROOT / "_bmad-output/implementation-artifacts/sprint-status.yaml"
-IMPL_ARTIFACTS = _PROJECT_ROOT / "_bmad-output/implementation-artifacts"
-PLANNING_ARTIFACTS = _PROJECT_ROOT / "_bmad-output/planning-artifacts"
-TEST_ARTIFACTS = _PROJECT_ROOT / "_bmad-output/test-artifacts"
-RUNS_DIR = Path(__file__).resolve().parent / "runs"
-
-DEV_MODEL = "opus"
-REVIEW_MODEL = "sonnet"
-CLAUDE_BIN = "claude"
-
-STEP_TIMEOUTS: dict[str, int] = {
-    "create-story": 600,
-    "dev-story": 1200,
-    "code-review": 900,
-    "trace": 600,
-    "build": 300,
-    "test": 300,
-}
-
-CODEX_TIMEOUT = 600
-CODEX_BIN = "codex"
-
-TIMEOUTS = STEP_TIMEOUTS
-
-MAX_REVIEW_RETRIES = 2
-
-WORKFLOWS = {
-    "create-story": "/bmad-bmm-create-story",
-    "dev-story": "/bmad-bmm-dev-story",
-    "code-review": "/bmad-bmm-code-review",
-    "trace": "/bmad-tea-testarch-trace",
-}
-
-STORY_TYPES = {"scaffold", "feature", "refactor", "bugfix"}
-DEFAULT_STORY_TYPE = "feature"
-
-STEP_MODES = dict(_STEP_MODES)
-
-ARCHITECTURAL_PATHS = ["*/schema/*", "*/migrations/*", "packages/shared/"]
-MAX_FIX_FILES = 3
-
-MAX_PROMPT_CHARS = 20_000
-PROMPT_WARNING_CHARS = 15_000
-
-DEFAULT_REVIEW_MODE = "A"
-MODE_B_TAGS = {"security", "auth", "rbac", "data-isolation"}
-
-INFERENCE_KEYWORD_MAP: dict[str, str] = dict(_BUILTIN_INFERENCE_KEYWORDS)
-
-PIPELINE_STEPS = ["create-story", "dev-story", "code-review", "trace"]
-
-
-def get_review_step_mode(review_mode: str) -> dict:
-    """Return the correct STEP_MODES entry based on resolved review mode."""
-    return STEP_MODES[f"code-review-mode-{review_mode.lower()}"]

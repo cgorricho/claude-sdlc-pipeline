@@ -210,7 +210,7 @@ def run_pipeline(
             step_log.started = now_iso()
             log.info(f"Step 1/4: create-story → {config.workflows['create-story']} (model: {config.models.dev})")
 
-            prompt = create_story_prompt(story_key)
+            prompt = create_story_prompt(story_key, config)
             run_log.prompt_sizes["create-story"] = len(prompt)
             log.debug(f"Prompt size: {len(prompt)} chars ({measure_prompt(prompt)} est. tokens)")
 
@@ -220,6 +220,7 @@ def run_pipeline(
                 config.models.dev,
                 run_dir / "01-create-story.stdout.md",
                 project_root,
+                config,
                 verbose=verbose,
             )
             log.debug(f"Claude exit code: {exit_code}")
@@ -245,17 +246,17 @@ def run_pipeline(
             sys.exit(1)
 
         # Read story metadata
-        story_type = read_story_type(story_file)
-        story_tags = read_story_tags(story_file)
+        story_type = read_story_type(story_file, config)
+        story_tags = read_story_tags(story_file, config)
         run_log.story_type = story_type
-        run_log.review_mode = select_review_mode(story_tags, review_mode)
+        run_log.review_mode = select_review_mode(story_tags, review_mode, config)
         log.info(f"  Story type: {story_type} | Review mode: {run_log.review_mode}")
         if story_tags:
             log.info(f"  Tags: {', '.join(story_tags)}")
 
         # Extract referenced document sections
         story_text = story_file.read_text()
-        ref_sections = extract_referenced_sections(story_text)
+        ref_sections = extract_referenced_sections(story_text, config)
         ref_context = "\n\n".join(f"### {k}\n{v}" for k, v in ref_sections.items())
         log.debug(f"Extracted {len(ref_sections)} referenced sections")
 
@@ -264,7 +265,7 @@ def run_pipeline(
         log.info(f"Step 2/4: dev-story → {config.workflows['dev-story']} (model: {config.models.dev})")
         log.info(f"  Story file: {story_file.name}")
 
-        prompt = dev_story_prompt(str(story_file), ref_context)
+        prompt = dev_story_prompt(str(story_file), config, ref_context)
         run_log.prompt_sizes["dev-story"] = len(prompt)
         log.debug(f"Prompt size: {len(prompt)} chars ({measure_prompt(prompt)} est. tokens)")
 
@@ -274,13 +275,14 @@ def run_pipeline(
             config.models.dev,
             run_dir / "02-dev-story.stdout.md",
             project_root,
+            config,
             verbose=verbose,
         )
         log.debug(f"Claude exit code: {exit_code}")
 
         # Independent verification (AD-2)
         log.info("  Running independent build+test verification...")
-        build_ok, test_ok = run_build_verify(project_root, run_dir)
+        build_ok, test_ok = run_build_verify(project_root, run_dir, config)
         test_summary = parse_test_results(run_dir / "test-results.json") if test_ok else {}
 
         log.info(f"  Build: {'PASS' if build_ok else 'FAIL'}")
@@ -341,7 +343,7 @@ def run_pipeline(
             if stale_results.exists():
                 stale_results.unlink()
                 log.debug("  Invalidated stale test-results.json")
-            build_ok, test_ok = run_build_verify(project_root, run_dir)
+            build_ok, test_ok = run_build_verify(project_root, run_dir, config)
             if not build_ok or not test_ok:
                 log.error("  Build/test failed on resume. Fix before retrying.")
                 if not build_ok:
@@ -436,7 +438,7 @@ def run_pipeline(
                     indent=2,
                 ) if (run_dir / "test-results.json").exists() else "{}"
 
-                story_tags = read_story_tags(story_file)
+                story_tags = read_story_tags(story_file, config)
                 log.info(f"  Tags for checklist: {', '.join(story_tags) if story_tags else 'none'}")
 
                 # D2: Try Codex automated adversarial review
@@ -446,11 +448,11 @@ def run_pipeline(
                 try:
                     review_prompt_text = codex_review_prompt(
                         story_key, str(story_file), file_inv, test_summary_str,
-                        story_tags=story_tags,
+                        config, story_tags=story_tags,
                     )
                     codex_result = run_codex_review(
                         story_key, run_dir, impl_artifacts, review_prompt_text,
-                        cwd=project_root,
+                        config, cwd=project_root,
                     )
                     if codex_result.exit_code != 0:
                         codex_failed = True
@@ -588,13 +590,13 @@ def run_pipeline(
 
                 cursor_prompt = mode_b_cursor_prompt(
                     story_key, str(story_file), file_inv, test_summary_str,
-                    story_tags=story_tags,
+                    config, story_tags=story_tags,
                 )
                 cursor_prompt_path = run_dir / "03-code-review-cursor-prompt.md"
                 cursor_prompt_path.write_text(cursor_prompt)
 
                 resume_instructions = mode_b_resume_instructions(
-                    story_key, str(run_dir)
+                    story_key, str(run_dir), config
                 )
                 resume_path = run_dir / "03-code-review-resume-instructions.md"
                 resume_path.write_text(resume_instructions)
@@ -648,6 +650,7 @@ def run_pipeline(
                 str(story_file),
                 file_inventory=file_inv,
                 test_summary=test_summary_str,
+                config=config,
             )
             run_log.prompt_sizes[f"code-review{suffix}"] = len(prompt)
             log.debug(f"Prompt size: {len(prompt)} chars ({measure_prompt(prompt)} est. tokens)")
@@ -658,6 +661,7 @@ def run_pipeline(
                 config.models.review,
                 run_dir / f"03-code-review{suffix}.stdout.md",
                 project_root,
+                config,
                 verbose=verbose,
             )
             log.debug(f"Claude exit code: {exit_code}")
@@ -692,7 +696,7 @@ def run_pipeline(
                     stale_results.unlink()
                     log.debug("  Invalidated stale test-results.json")
 
-                build_ok, test_ok = run_build_verify(project_root, run_dir)
+                build_ok, test_ok = run_build_verify(project_root, run_dir, config)
                 step_log.fixes_applied = findings["fix"]
                 if not build_ok or not test_ok:
                     log.warning("  Build/test failed after [FIX] applications")
@@ -762,15 +766,16 @@ def run_pipeline(
                 # Re-run dev-story to apply fixes
                 run_workflow(
                     "dev-story",
-                    dev_story_prompt(str(story_file)),
+                    dev_story_prompt(str(story_file), config),
                     config.models.dev,
                     run_dir / f"02-dev-story.retry{attempt}.stdout.md",
                     project_root,
+                    config,
                     verbose=verbose,
                 )
 
                 # Re-verify
-                build_ok, test_ok = run_build_verify(project_root, run_dir)
+                build_ok, test_ok = run_build_verify(project_root, run_dir, config)
                 if not build_ok or not test_ok:
                     log.warning(f"  Build/test failed after retry {attempt}")
                     if not build_ok:
@@ -806,7 +811,7 @@ def run_pipeline(
             if stale_results.exists():
                 stale_results.unlink()
                 log.debug("  Invalidated stale test-results.json")
-            build_ok, test_ok = run_build_verify(project_root, run_dir)
+            build_ok, test_ok = run_build_verify(project_root, run_dir, config)
             if not build_ok or not test_ok:
                 log.error("  Build/test failed on resume before trace. Fix before retrying.")
                 if not build_ok:
@@ -820,12 +825,12 @@ def run_pipeline(
         log.info(f"Step 4/4: trace → {config.workflows['trace']} (model: {config.models.dev})")
 
         story_file = find_story_file(story_key, impl_artifacts)
-        story_type = read_story_type(story_file) if story_file else config.story.default_type
+        story_type = read_story_type(story_file, config) if story_file else config.story.default_type
         test_summary_str = json.dumps(
             parse_test_results(run_dir / "test-results.json")
         ) if (run_dir / "test-results.json").exists() else "{}"
 
-        prompt = trace_prompt(story_key, story_type, test_summary_str, format="compact")
+        prompt = trace_prompt(story_key, story_type, test_summary_str, config, format="compact")
         run_log.prompt_sizes["trace"] = len(prompt)
         log.debug(f"Prompt size: {len(prompt)} chars ({measure_prompt(prompt)} est. tokens)")
 
@@ -835,6 +840,7 @@ def run_pipeline(
             config.models.dev,
             run_dir / "04-trace.stdout.md",
             project_root,
+            config,
             verbose=verbose,
         )
         log.debug(f"Claude exit code: {exit_code}")
