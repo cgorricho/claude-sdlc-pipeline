@@ -264,6 +264,46 @@ class TestInferenceKeywordMerge:
 # ---------------------------------------------------------------------------
 
 
+class TestAtddDefaults:
+    """TEA Bootstrap & ATDD Integration: verify atdd in defaults."""
+
+    def test_pipeline_steps_includes_atdd(self):
+        config = Config()
+        assert "atdd" in config.story.pipeline_steps
+        assert config.story.pipeline_steps.index("atdd") == 1
+
+    def test_default_pipeline_steps_order(self):
+        config = Config()
+        expected = ["create-story", "atdd", "dev-story", "code-review", "trace"]
+        assert config.story.pipeline_steps == expected
+
+    def test_timeouts_has_atdd(self):
+        config = Config()
+        assert "atdd" in config.timeouts
+        assert config.timeouts["atdd"] == 600
+
+    def test_workflows_has_atdd(self):
+        config = Config()
+        assert "atdd" in config.workflows
+        assert config.workflows["atdd"] == "/bmad-testarch-atdd"
+
+    def test_step_modes_has_atdd(self):
+        config = Config()
+        assert "atdd" in config.STEP_MODES
+        assert config.STEP_MODES["atdd"]["mode"] == "autonomous"
+        assert config.STEP_MODES["atdd"]["type"] == "ceremony"
+
+    def test_user_config_without_atdd_preserves_4_step(self, config_dir):
+        """Existing users who set pipeline_steps explicitly keep their config."""
+        data = _minimal_config(
+            story={"pipeline_steps": ["create-story", "dev-story", "code-review", "trace"]}
+        )
+        path = _write_config(config_dir, data)
+        config = load_config(path)
+        assert "atdd" not in config.story.pipeline_steps
+        assert len(config.story.pipeline_steps) == 4
+
+
 class TestGetConfigSingleton:
     def test_returns_same_instance(self, config_dir):
         path = _write_config(config_dir, _minimal_config())

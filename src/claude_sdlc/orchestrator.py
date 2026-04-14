@@ -5,7 +5,7 @@ orchestrator.py — Automate the SDLC story cycle for a single story.
 Phase 2: Hardened pipeline with robust resume, pipeline-owned ceremony
 transitions, verify-after-fix loop, scoped clean, and observability.
 
-Pipeline: create-story → dev-story → verify → code-review → trace
+Pipeline: create-story → atdd → dev-story → verify → code-review → trace
 
 Usage:
     csdlc run --story 1-3
@@ -36,12 +36,14 @@ from claude_sdlc.config import Config, get_config
 from claude_sdlc.contracts import (
     check_dev_story_status_gap,
     find_story_file,
+    validate_atdd,
     validate_create_story,
     validate_dev_story,
     validate_trace,
 )
 from claude_sdlc.plugins import load_plugins
 from claude_sdlc.prompts import (
+    atdd_prompt,
     code_review_prompt,
     codex_review_prompt,
     create_story_prompt,
@@ -67,6 +69,7 @@ def run_pipeline(
     story_key: str,
     *,
     skip_create: bool = False,
+    skip_atdd: bool = False,
     skip_trace: bool = False,
     resume: bool = False,
     resume_from: str | None = None,
@@ -190,6 +193,7 @@ def run_pipeline(
         print("Steps to run:")
         for step in pipeline_steps:
             skip = (step == "create-story" and skip_create) or \
+                   (step == "atdd" and skip_atdd) or \
                    (step == "trace" and skip_trace)
             will_run = should_run_step(step, start_from, skip, pipeline_steps)
             marker = "  SKIP" if not will_run else "  RUN "
@@ -208,7 +212,7 @@ def run_pipeline(
         else:
             step_log = StepLog(step="create-story", mode=config.STEP_MODES["create-story"])
             step_log.started = now_iso()
-            log.info(f"Step 1/4: create-story → {config.workflows['create-story']} (model: {config.models.dev})")
+            log.info(f"Step 1/5: create-story → {config.workflows['create-story']} (model: {config.models.dev})")
 
             prompt = create_story_prompt(story_key, config)
             run_log.prompt_sizes["create-story"] = len(prompt)
@@ -238,7 +242,52 @@ def run_pipeline(
             run_log.save(run_log_path)
             log.info(f"  create-story completed ✓ ({step_log.duration_seconds}s)")
 
-    # ── STEP 2: Dev Story + Verify ────────────────────────────────
+    # ── STEP 2: ATDD ─────────────────────────────────────────────
+    if should_run_step("atdd", start_from, skip_atdd, pipeline_steps):
+        story_file = find_story_file(story_key, impl_artifacts)
+        if not story_file:
+            log.error(f"No story file found matching {story_key}-*.md")
+            sys.exit(1)
+
+        step_log = StepLog(step="atdd", mode=config.STEP_MODES["atdd"])
+        step_log.started = now_iso()
+        log.info(f"Step 2/5: atdd → {config.workflows['atdd']} (model: {config.models.dev})")
+
+        story_text = story_file.read_text()
+        ref_sections = extract_referenced_sections(story_text, config)
+        ref_context = "\n\n".join(f"### {k}\n{v}" for k, v in ref_sections.items())
+
+        prompt = atdd_prompt(str(story_file), config, ref_context)
+        run_log.prompt_sizes["atdd"] = len(prompt)
+        log.debug(f"Prompt size: {len(prompt)} chars ({measure_prompt(prompt)} est. tokens)")
+
+        exit_code, _ = run_workflow(
+            "atdd",
+            prompt,
+            config.models.dev,
+            run_dir / "02-atdd.stdout.md",
+            project_root,
+            config,
+            verbose=verbose,
+        )
+        log.debug(f"Claude exit code: {exit_code}")
+        if exit_code != 0:
+            log.warning(f"  ATDD workflow exited with code {exit_code}")
+
+        result = validate_atdd(story_key, test_artifacts)
+        if not result.passed:
+            log.error(f"Contract violation: {result.error}")
+            fail_step(run_log, step_log, run_log_path,
+                      f"Contract violation: {result.error}")
+
+        step_log.status = str(StepStatus.COMPLETED)
+        step_log.state_after = "ready-for-dev"
+        step_log.duration_seconds = elapsed_since(step_log.started)
+        run_log.replace_or_append_step(step_log)
+        run_log.save(run_log_path)
+        log.info(f"  atdd completed ✓ ({step_log.duration_seconds}s)")
+
+    # ── STEP 3: Dev Story + Verify ────────────────────────────────
     if should_run_step("dev-story", start_from, False, pipeline_steps):
         story_file = find_story_file(story_key, impl_artifacts)
         if not story_file:
@@ -262,7 +311,7 @@ def run_pipeline(
 
         step_log = StepLog(step="dev-story", mode=config.STEP_MODES["dev-story"])
         step_log.started = now_iso()
-        log.info(f"Step 2/4: dev-story → {config.workflows['dev-story']} (model: {config.models.dev})")
+        log.info(f"Step 3/5: dev-story → {config.workflows['dev-story']} (model: {config.models.dev})")
         log.info(f"  Story file: {story_file.name}")
 
         prompt = dev_story_prompt(str(story_file), config, ref_context)
@@ -273,7 +322,7 @@ def run_pipeline(
             "dev-story",
             prompt,
             config.models.dev,
-            run_dir / "02-dev-story.stdout.md",
+            run_dir / "03-dev-story.stdout.md",
             project_root,
             config,
             verbose=verbose,
@@ -368,7 +417,7 @@ def run_pipeline(
             )
 
             if is_manual_fallback_resume:
-                log.info("Step 3/4: code-review → Mode B (resuming from manual fallback)")
+                log.info("Step 4/5: code-review → Mode B (resuming from manual fallback)")
                 log.info("  Skipping Codex — prior pause was manual fallback")
 
                 step_log = StepLog(
@@ -442,7 +491,7 @@ def run_pipeline(
                 log.info(f"  Tags for checklist: {', '.join(story_tags) if story_tags else 'none'}")
 
                 # D2: Try Codex automated adversarial review
-                log.info("Step 3/4: code-review → Mode B (invoking Codex adversarial review)")
+                log.info("Step 4/5: code-review → Mode B (invoking Codex adversarial review)")
                 codex_failed = False
                 codex_failure_reason = ""
                 try:
@@ -592,13 +641,13 @@ def run_pipeline(
                     story_key, str(story_file), file_inv, test_summary_str,
                     config, story_tags=story_tags,
                 )
-                cursor_prompt_path = run_dir / "03-code-review-cursor-prompt.md"
+                cursor_prompt_path = run_dir / "04-code-review-cursor-prompt.md"
                 cursor_prompt_path.write_text(cursor_prompt)
 
                 resume_instructions = mode_b_resume_instructions(
                     story_key, str(run_dir), config
                 )
-                resume_path = run_dir / "03-code-review-resume-instructions.md"
+                resume_path = run_dir / "04-code-review-resume-instructions.md"
                 resume_path.write_text(resume_instructions)
 
                 step_log.status = str(StepStatus.PAUSED)
@@ -634,7 +683,7 @@ def run_pipeline(
             )
             step_log.started = now_iso()
             log.info(
-                f"Step 3/4: code-review → {config.workflows['code-review']} "
+                f"Step 4/5: code-review → {config.workflows['code-review']} "
                 f"Mode A (model: {config.models.review}, attempt {attempt})"
             )
 
@@ -659,7 +708,7 @@ def run_pipeline(
                 "code-review",
                 prompt,
                 config.models.review,
-                run_dir / f"03-code-review{suffix}.stdout.md",
+                run_dir / f"04-code-review{suffix}.stdout.md",
                 project_root,
                 config,
                 verbose=verbose,
@@ -822,7 +871,7 @@ def run_pipeline(
 
         step_log = StepLog(step="trace", mode=config.STEP_MODES["trace"])
         step_log.started = now_iso()
-        log.info(f"Step 4/4: trace → {config.workflows['trace']} (model: {config.models.dev})")
+        log.info(f"Step 5/5: trace → {config.workflows['trace']} (model: {config.models.dev})")
 
         story_file = find_story_file(story_key, impl_artifacts)
         story_type = read_story_type(story_file, config) if story_file else config.story.default_type
@@ -838,7 +887,7 @@ def run_pipeline(
             "trace",
             prompt,
             config.models.dev,
-            run_dir / "04-trace.stdout.md",
+            run_dir / "05-trace.stdout.md",
             project_root,
             config,
             verbose=verbose,
@@ -873,7 +922,7 @@ def run_pipeline(
         run_log.save(run_log_path)
         log.info(f"  trace completed ✓ ({step_log.duration_seconds}s)")
     elif skip_trace:
-        log.info("Step 4/4: Skipping trace (--skip-trace)")
+        log.info("Step 5/5: Skipping trace (--skip-trace)")
 
     # ── DONE ──────────────────────────────────────────────────────
     run_log.status = "completed"

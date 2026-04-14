@@ -2,7 +2,7 @@
 title: 'TEA Bootstrap & ATDD Integration'
 type: 'feature'
 created: '2026-04-13'
-status: 'draft'
+status: 'done'
 baseline_commit: '10a828a'
 context:
   - '{project-root}/_bmad-output/planning-artifacts/design-tea-bootstrap-and-atdd-integration.md'
@@ -70,16 +70,16 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/claude_sdlc/config.py` -- Add `atdd` to StoryConfig.pipeline_steps default (line 108), add `"atdd": 600` to Config.timeouts default (line 158), add `"atdd": "/bmad-testarch-atdd"` to Config.workflows default (line 166), add `"atdd": {"mode": "autonomous", "type": "ceremony"}` to `_STEP_MODES` (line 138). Update `_KNOWN_TOP_KEYS` if needed.
-- [ ] `src/claude_sdlc/prompts.py` -- Add `atdd_prompt(story_file_path: str, config: Config, referenced_context: str = "") -> str` that issues the ATDD workflow command with the story file path so the skill can generate acceptance tests from the story's criteria. Follow the same pattern as `dev_story_prompt`.
-- [ ] `src/claude_sdlc/contracts.py` -- Add `validate_atdd(story_key: str, test_artifacts_dir: Path) -> ContractResult` that checks: (1) at least one test file was created matching `{story_key}*` in test_artifacts_dir, (2) test file is non-empty. Return ContractResult with appropriate error messages.
-- [ ] `src/claude_sdlc/orchestrator.py` -- Add ATDD step block after create-story and before dev-story. Pattern: `if should_run_step("atdd", start_from, skip_atdd, pipeline_steps)` with StepLog, atdd_prompt call, run_workflow, validate_atdd, fail_step on contract violation. Add `skip_atdd: bool = False` parameter to `run_pipeline()`. Update step N/M numbering in all log.info messages to reflect 5-step cycle. Import `atdd_prompt` from prompts and `validate_atdd` from contracts. Update dry_run block to include atdd skip logic.
-- [ ] `src/claude_sdlc/cli.py` -- (a) Add `"atdd"` to `_PIPELINE_STEPS` list (line 18). (b) Add `--skip-atdd` click option to `run` command, pass to `run_pipeline()`. (c) Add `--skip-tea` flag to `init` command. After existing init steps (line 215), if not `skip_tea`: check for existing TEA artifacts in `{config.paths.test_artifacts}`, if missing run two Claude sessions via `run_workflow("tea-framework", ...)` and `run_workflow("tea-test-design", ...)` with 600s timeout. If artifacts exist, print skip message. (d) Add `--tea-only` flag to `init` that runs only the TEA bootstrap (skips config generation if config exists). (e) Add TEA check to `validate` command: scan `test_artifacts` dir for framework/design files, report `[PASS]`/`[WARN]`. (f) Add `setup-ci` subcommand that loads config, runs `run_workflow("setup-ci", ...)` with the testarch-ci skill.
-- [ ] `tests/test_config.py` -- Add tests: default pipeline_steps includes `atdd` at index 1; default timeouts has `atdd: 600`; default workflows has `atdd` key; `_STEP_MODES` has `atdd` entry.
-- [ ] `tests/test_prompts.py` -- Add test: `atdd_prompt` returns string containing workflow command and story file path; referenced_context is appended when provided.
-- [ ] `tests/test_contracts.py` -- Add tests: `validate_atdd` returns passed when matching test file exists; returns failed when no test file found; returns failed when test file is empty.
-- [ ] `tests/test_cli.py` -- Add tests: `--skip-atdd` accepted by run command; `--skip-tea` accepted by init; `setup-ci` subcommand exists; TEA validate check reports PASS/WARN appropriately.
-- [ ] `tests/test_orchestrator.py` -- Add test: ATDD step executes between create-story and dev-story when `atdd` is in pipeline_steps; ATDD step skipped when `skip_atdd=True`.
+- [x] `src/claude_sdlc/config.py` -- Add `atdd` to StoryConfig.pipeline_steps default (line 108), add `"atdd": 600` to Config.timeouts default (line 158), add `"atdd": "/bmad-testarch-atdd"` to Config.workflows default (line 166), add `"atdd": {"mode": "autonomous", "type": "ceremony"}` to `_STEP_MODES` (line 138). Update `_KNOWN_TOP_KEYS` if needed.
+- [x] `src/claude_sdlc/prompts.py` -- Add `atdd_prompt(story_file_path: str, config: Config, referenced_context: str = "") -> str` that issues the ATDD workflow command with the story file path so the skill can generate acceptance tests from the story's criteria. Follow the same pattern as `dev_story_prompt`.
+- [x] `src/claude_sdlc/contracts.py` -- Add `validate_atdd(story_key: str, test_artifacts_dir: Path) -> ContractResult` that checks: (1) at least one test file was created matching `{story_key}*` in test_artifacts_dir, (2) test file is non-empty. Return ContractResult with appropriate error messages.
+- [x] `src/claude_sdlc/orchestrator.py` -- Add ATDD step block after create-story and before dev-story. Pattern: `if should_run_step("atdd", start_from, skip_atdd, pipeline_steps)` with StepLog, atdd_prompt call, run_workflow, validate_atdd, fail_step on contract violation. Add `skip_atdd: bool = False` parameter to `run_pipeline()`. Update step N/M numbering in all log.info messages to reflect 5-step cycle. Import `atdd_prompt` from prompts and `validate_atdd` from contracts. Update dry_run block to include atdd skip logic.
+- [x] `src/claude_sdlc/cli.py` -- (a) Add `"atdd"` to `_PIPELINE_STEPS` list (line 18). (b) Add `--skip-atdd` click option to `run` command, pass to `run_pipeline()`. (c) Add `--skip-tea` flag to `init` command. After existing init steps (line 215), if not `skip_tea`: check for existing TEA artifacts in `{config.paths.test_artifacts}`, if missing run two Claude sessions via `run_workflow("tea-framework", ...)` and `run_workflow("tea-test-design", ...)` with 600s timeout. If artifacts exist, print skip message. (d) Add `--tea-only` flag to `init` that runs only the TEA bootstrap (skips config generation if config exists). (e) Add TEA check to `validate` command: scan `test_artifacts` dir for framework/design files, report `[PASS]`/`[WARN]`. (f) Add `setup-ci` subcommand that loads config, runs `run_workflow("setup-ci", ...)` with the testarch-ci skill.
+- [x] `tests/test_config.py` -- Add tests: default pipeline_steps includes `atdd` at index 1; default timeouts has `atdd: 600`; default workflows has `atdd` key; `_STEP_MODES` has `atdd` entry.
+- [x] `tests/test_prompts.py` -- Add test: `atdd_prompt` returns string containing workflow command and story file path; referenced_context is appended when provided.
+- [x] `tests/test_contracts.py` -- Add tests: `validate_atdd` returns passed when matching test file exists; returns failed when no test file found; returns failed when test file is empty.
+- [x] `tests/test_cli.py` -- Add tests: `--skip-atdd` accepted by run command; `--skip-tea` accepted by init; `setup-ci` subcommand exists; TEA validate check reports PASS/WARN appropriately.
+- [x] `tests/test_orchestrator.py` -- Add test: ATDD step executes between create-story and dev-story when `atdd` is in pipeline_steps; ATDD step skipped when `skip_atdd=True`.
 
 **Acceptance Criteria:**
 - Given default config, when `config.story.pipeline_steps` is read, then it equals `["create-story", "atdd", "dev-story", "code-review", "trace"]`
@@ -111,3 +111,47 @@ The `csdlc validate` TEA check uses `[WARN]` not `[FAIL]` because TEA is not str
 - `pytest tests/test_config.py tests/test_prompts.py tests/test_contracts.py tests/test_cli.py tests/test_orchestrator.py -v` -- expected: all tests pass
 - `csdlc validate` -- expected: existing checks pass, new TEA check reports WARN or PASS
 - `csdlc run --story 1-1 --dry-run` -- expected: shows 5 steps including atdd
+
+## Suggested Review Order
+
+**ATDD pipeline step (the design intent)**
+
+- ATDD orchestrator block — entry point showing the new step's dispatch pattern
+  [`orchestrator.py:245`](../../src/claude_sdlc/orchestrator.py#L245)
+
+- ATDD contract validator with hardened glob (`{story_key}-*`, file-only, prefix-collision-safe)
+  [`contracts.py:188`](../../src/claude_sdlc/contracts.py#L188)
+
+- ATDD prompt builder mirroring `dev_story_prompt`
+  [`prompts.py:139`](../../src/claude_sdlc/prompts.py#L139)
+
+- Defaults wired into Config — pipeline_steps, timeouts, workflows, STEP_MODES
+  [`config.py:108`](../../src/claude_sdlc/config.py#L108)
+
+**TEA bootstrap and CI surfaces**
+
+- TEA bootstrap helper called from init unless `--skip-tea`; mutually exclusive with `--tea-only`
+  [`cli.py:240`](../../src/claude_sdlc/cli.py#L240)
+
+- TEA readiness check in `csdlc validate` — `[WARN]` not `[FAIL]`, uses `load_config` for path consistency
+  [`cli.py:376`](../../src/claude_sdlc/cli.py#L376)
+
+- New `setup-ci` subcommand wrapping `testarch-ci` skill with config-load error handling
+  [`cli.py:411`](../../src/claude_sdlc/cli.py#L411)
+
+- `--skip-atdd` flag plumbed through `run` command into `run_pipeline`
+  [`cli.py:79`](../../src/claude_sdlc/cli.py#L79)
+
+**Tests**
+
+- ATDD contract tests including directory and prefix-collision edge cases
+  [`test_contracts.py:158`](../../tests/test_contracts.py#L158)
+
+- Default config tests verifying atdd at index 1 of pipeline_steps
+  [`test_config.py:262`](../../tests/test_config.py#L262)
+
+- CLI tests for `--skip-atdd`, `--skip-tea`, `--tea-only`, `setup-ci`, TEA validate
+  [`test_cli.py:333`](../../tests/test_cli.py#L333)
+
+- Orchestrator `should_run_step` tests covering the new atdd position
+  [`test_orchestrator.py:75`](../../tests/test_orchestrator.py#L75)

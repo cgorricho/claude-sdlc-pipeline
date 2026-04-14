@@ -105,7 +105,7 @@ class StoryConfig:
     )
     default_type: str = "feature"
     pipeline_steps: list[str] = field(
-        default_factory=lambda: ["create-story", "dev-story", "code-review", "trace"]
+        default_factory=lambda: ["create-story", "atdd", "dev-story", "code-review", "trace"]
     )
 
 
@@ -137,6 +137,7 @@ _MODE_B_TAGS: frozenset[str] = frozenset(
 
 _STEP_MODES: dict[str, dict[str, str]] = {
     "create-story": {"mode": "autonomous", "type": "ceremony"},
+    "atdd": {"mode": "autonomous", "type": "ceremony"},
     "dev-story": {"mode": "autonomous", "type": "ceremony"},
     "verify": {"mode": "autonomous", "type": "ceremony"},
     "code-review-mode-a": {"mode": "autonomous", "type": "ceremony"},
@@ -158,6 +159,7 @@ class Config:
     timeouts: dict[str, int] = field(
         default_factory=lambda: {
             "create-story": 600,
+            "atdd": 600,
             "dev-story": 1200,
             "code-review": 900,
             "trace": 600,
@@ -166,6 +168,7 @@ class Config:
     workflows: dict[str, str] = field(
         default_factory=lambda: {
             "create-story": "/bmad-bmm-create-story",
+            "atdd": "/bmad-testarch-atdd",
             "dev-story": "/bmad-bmm-dev-story",
             "code-review": "/bmad-bmm-code-review",
             "trace": "/bmad-tea-testarch-trace",

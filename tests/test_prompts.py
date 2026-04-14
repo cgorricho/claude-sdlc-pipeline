@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from claude_sdlc.config import Config
 from claude_sdlc.prompts import (
+    atdd_prompt,
     measure_prompt,
     build_prompt_with_budget,
     extract_referenced_sections,
@@ -125,6 +126,25 @@ class TestExtractSectionByHeader:
         lines = ["# Top", "## Target", "Content at end"]
         result = extract_section_by_header(lines, "Target")
         assert "Content at end" in result
+
+
+class TestAtddPrompt:
+    def test_contains_workflow_command(self, default_config):
+        prompt = atdd_prompt("/path/to/story.md", default_config)
+        assert default_config.workflows["atdd"] in prompt
+
+    def test_contains_story_path(self, default_config):
+        prompt = atdd_prompt("/path/to/story.md", default_config)
+        assert "/path/to/story.md" in prompt
+
+    def test_with_referenced_context(self, default_config):
+        prompt = atdd_prompt("/path/story.md", default_config, "extra context here")
+        assert "extra context here" in prompt
+        assert "Referenced Context" in prompt
+
+    def test_without_referenced_context(self, default_config):
+        prompt = atdd_prompt("/path/story.md", default_config)
+        assert "Referenced Context" not in prompt
 
 
 class TestCreateStoryPrompt:

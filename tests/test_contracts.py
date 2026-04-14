@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from claude_sdlc.contracts import (
     count_acceptance_criteria,
+    validate_atdd,
     validate_create_story,
     validate_dev_story,
     validate_code_review,
@@ -152,6 +153,61 @@ class TestCheckDevStoryStatusGap:
             "development_status:\n  2-1-some-feature: ready-for-dev\n"
         )
         assert check_dev_story_status_gap("2-1", tmp_sprint_status)
+
+
+class TestValidateAtdd:
+    """TEA Bootstrap & ATDD Integration: validate_atdd contract."""
+
+    def test_passes_when_test_files_exist(self, tmp_path):
+        test_dir = tmp_path / "test-artifacts"
+        test_dir.mkdir()
+        (test_dir / "2-1-acceptance-tests.spec.ts").write_text("describe('AC-1')")
+        result = validate_atdd("2-1", test_dir)
+        assert result.passed
+
+    def test_fails_when_no_test_files(self, tmp_path):
+        test_dir = tmp_path / "test-artifacts"
+        test_dir.mkdir()
+        result = validate_atdd("2-1", test_dir)
+        assert not result.passed
+        assert "No test files found" in result.error
+
+    def test_fails_when_test_file_empty(self, tmp_path):
+        test_dir = tmp_path / "test-artifacts"
+        test_dir.mkdir()
+        (test_dir / "2-1-acceptance-tests.spec.ts").write_text("")
+        result = validate_atdd("2-1", test_dir)
+        assert not result.passed
+        assert "Empty test files" in result.error
+
+    def test_fails_when_dir_missing(self, tmp_path):
+        result = validate_atdd("2-1", tmp_path / "nonexistent")
+        assert not result.passed
+        assert "not found" in result.error
+
+    def test_multiple_test_files(self, tmp_path):
+        test_dir = tmp_path / "test-artifacts"
+        test_dir.mkdir()
+        (test_dir / "2-1-ac1.spec.ts").write_text("test 1")
+        (test_dir / "2-1-ac2.spec.ts").write_text("test 2")
+        result = validate_atdd("2-1", test_dir)
+        assert result.passed
+
+    def test_ignores_directories(self, tmp_path):
+        """Directories matching the pattern should not count as test files."""
+        test_dir = tmp_path / "test-artifacts"
+        test_dir.mkdir()
+        (test_dir / "2-1-tests").mkdir()
+        result = validate_atdd("2-1", test_dir)
+        assert not result.passed
+
+    def test_no_prefix_collision(self, tmp_path):
+        """2-1 should not match 2-10-* files (uses story_key-* not story_key*)."""
+        test_dir = tmp_path / "test-artifacts"
+        test_dir.mkdir()
+        (test_dir / "2-10-unrelated.spec.ts").write_text("other story")
+        result = validate_atdd("2-1", test_dir)
+        assert not result.passed
 
 
 class TestValidateTrace:

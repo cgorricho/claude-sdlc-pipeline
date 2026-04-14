@@ -69,6 +69,7 @@ class TestShouldRunStep:
     def test_normal_order(self):
         steps = _default_config().story.pipeline_steps
         assert should_run_step("create-story", "create-story", False, steps) is True
+        assert should_run_step("atdd", "create-story", False, steps) is True
         assert should_run_step("dev-story", "create-story", False, steps) is True
         assert should_run_step("trace", "create-story", False, steps) is True
 
@@ -76,12 +77,30 @@ class TestShouldRunStep:
         steps = _default_config().story.pipeline_steps
         assert should_run_step("create-story", "create-story", True, steps) is False
 
+    def test_skip_atdd_flag(self):
+        steps = _default_config().story.pipeline_steps
+        assert should_run_step("atdd", "create-story", True, steps) is False
+        # Other steps still run
+        assert should_run_step("dev-story", "create-story", False, steps) is True
+
     def test_resume_skips_earlier_steps(self):
         steps = _default_config().story.pipeline_steps
         assert should_run_step("create-story", "code-review", False, steps) is False
+        assert should_run_step("atdd", "code-review", False, steps) is False
         assert should_run_step("dev-story", "code-review", False, steps) is False
         assert should_run_step("code-review", "code-review", False, steps) is True
         assert should_run_step("trace", "code-review", False, steps) is True
+
+    def test_resume_from_atdd(self):
+        steps = _default_config().story.pipeline_steps
+        assert should_run_step("create-story", "atdd", False, steps) is False
+        assert should_run_step("atdd", "atdd", False, steps) is True
+        assert should_run_step("dev-story", "atdd", False, steps) is True
+
+    def test_atdd_not_in_custom_steps_with_skip(self):
+        """4-step cycle config: atdd skipped via skip flag."""
+        steps = ["create-story", "dev-story", "code-review", "trace"]
+        assert should_run_step("atdd", "create-story", True, steps) is False
 
 
 class TestParseReviewFindings:

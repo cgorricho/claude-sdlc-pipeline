@@ -136,6 +136,23 @@ ambiguity, make reasonable decisions and document them in the story file.
 """
 
 
+def atdd_prompt(story_file_path: str, config: Config, referenced_context: str = "") -> str:
+    """Build the prompt for atdd step."""
+    prompt = f"""\
+{config.workflows['atdd']}
+
+The story file is at: {story_file_path}
+
+Generate failing acceptance tests from the story's acceptance criteria.
+Each AC should have at least one test. Tests must fail (red phase) since
+the implementation does not exist yet. Save test files to the test
+artifacts directory.
+"""
+    if referenced_context:
+        prompt += f"\n\n## Referenced Context\n{referenced_context}"
+    return prompt
+
+
 def dev_story_prompt(story_file_path: str, config: Config, referenced_context: str = "") -> str:
     """Build the prompt for dev-story step."""
     prompt = f"""\

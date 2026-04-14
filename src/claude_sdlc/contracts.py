@@ -185,6 +185,29 @@ def validate_code_review(story_key: str, impl_dir: Path,
     return ContractResult(passed=True)
 
 
+def validate_atdd(story_key: str, test_artifacts_dir: Path) -> ContractResult:
+    """Validate atdd outputs match contract.
+
+    Contract:
+      - At least one test file matching {story_key}-* exists in test_artifacts_dir
+      - Match is a file (not a directory)
+      - Test file is non-empty
+    """
+    if not test_artifacts_dir.exists():
+        return ContractResult(passed=False, error=f"Test artifacts directory not found: {test_artifacts_dir}")
+
+    matches = [f for f in test_artifacts_dir.glob(f"{story_key}-*") if f.is_file()]
+    if not matches:
+        return ContractResult(passed=False, error=f"No test files found matching {story_key}-* in {test_artifacts_dir}")
+
+    empty_files = [f for f in matches if f.stat().st_size == 0]
+    if empty_files:
+        names = ", ".join(f.name for f in empty_files)
+        return ContractResult(passed=False, error=f"Empty test files: {names}")
+
+    return ContractResult(passed=True)
+
+
 def validate_trace(report_path: Path) -> ContractResult:
     """Validate trace outputs match contract.
 

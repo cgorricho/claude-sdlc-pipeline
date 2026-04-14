@@ -35,6 +35,7 @@ class TestHelpOutput:
         assert result.exit_code == 0
         assert "--story" in result.output
         assert "--skip-create" in result.output
+        assert "--skip-atdd" in result.output
         assert "--skip-trace" in result.output
         assert "--resume" in result.output
         assert "--resume-from" in result.output
@@ -47,6 +48,13 @@ class TestHelpOutput:
         result = runner.invoke(main, ["init", "--help"])
         assert result.exit_code == 0
         assert "--non-interactive" in result.output
+        assert "--skip-tea" in result.output
+        assert "--tea-only" in result.output
+
+    def test_setup_ci_help(self, runner):
+        result = runner.invoke(main, ["setup-ci", "--help"])
+        assert result.exit_code == 0
+        assert "CI/CD" in result.output or "ci" in result.output.lower()
 
     def test_validate_help(self, runner):
         result = runner.invoke(main, ["validate", "--help"])
@@ -78,6 +86,7 @@ class TestRun:
             mock_pipeline.assert_called_once_with(
                 "1-3",
                 skip_create=False,
+                skip_atdd=False,
                 skip_trace=False,
                 resume=False,
                 resume_from=None,
@@ -91,7 +100,7 @@ class TestRun:
         with patch("claude_sdlc.orchestrator.run_pipeline") as mock_pipeline:
             result = runner.invoke(main, [
                 "run", "--story", "2-1",
-                "--skip-create", "--skip-trace",
+                "--skip-create", "--skip-atdd", "--skip-trace",
                 "--resume-from", "code-review",
                 "--review-mode", "B",
                 "--dry-run", "--clean", "--verbose",
@@ -99,6 +108,7 @@ class TestRun:
             mock_pipeline.assert_called_once_with(
                 "2-1",
                 skip_create=True,
+                skip_atdd=True,
                 skip_trace=True,
                 resume=False,
                 resume_from="code-review",
@@ -114,6 +124,7 @@ class TestRun:
             mock_pipeline.assert_called_once_with(
                 "1-3",
                 skip_create=False,
+                skip_atdd=False,
                 skip_trace=False,
                 resume=False,
                 resume_from=None,
@@ -282,3 +293,104 @@ class TestValidate:
             result = runner.invoke(main, ["validate"])
             assert "[FAIL]" in result.output
             assert "nonexistent_binary_xyz" in result.output
+
+    def test_validate_tea_pass(self, runner, tmp_path):
+        """TEA check passes when framework + test design files exist."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            config_dir = Path(".csdlc")
+            config_dir.mkdir()
+            (config_dir / "config.yaml").write_text(
+                "project:\n  root: ..\n  name: test\n"
+                "claude:\n  bin: echo\n"
+                "build:\n  command: echo hello\n"
+            )
+            # Create TEA artifacts
+            tea_dir = Path("_bmad-output/test-artifacts")
+            tea_dir.mkdir(parents=True)
+            (tea_dir / "framework-scaffold.md").write_text("framework")
+            (tea_dir / "test-design.md").write_text("design")
+
+            result = runner.invoke(main, ["validate"])
+            assert "[PASS] TEA:" in result.output
+
+    def test_validate_tea_warn(self, runner, tmp_path):
+        """TEA check warns when artifacts are missing."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            config_dir = Path(".csdlc")
+            config_dir.mkdir()
+            (config_dir / "config.yaml").write_text(
+                "project:\n  root: ..\n  name: test\n"
+                "claude:\n  bin: echo\n"
+                "build:\n  command: echo hello\n"
+            )
+
+            result = runner.invoke(main, ["validate"])
+            assert "[WARN] TEA:" in result.output
+            assert "csdlc init --tea-only" in result.output
+
+
+# ---------------------------------------------------------------------------
+# csdlc run --skip-atdd
+# ---------------------------------------------------------------------------
+
+
+class TestRunSkipAtdd:
+    def test_skip_atdd_passed_to_pipeline(self, runner):
+        with patch("claude_sdlc.orchestrator.run_pipeline") as mock_pipeline:
+            result = runner.invoke(main, [
+                "run", "--story", "1-3", "--skip-atdd",
+            ])
+            mock_pipeline.assert_called_once()
+            assert mock_pipeline.call_args[1]["skip_atdd"] is True
+
+    def test_resume_from_atdd_accepted(self, runner):
+        """atdd is a valid --resume-from target."""
+        with patch("claude_sdlc.orchestrator.run_pipeline") as mock_pipeline:
+            result = runner.invoke(main, [
+                "run", "--story", "1-3", "--resume-from", "atdd",
+            ])
+            mock_pipeline.assert_called_once()
+            assert mock_pipeline.call_args[1]["resume_from"] == "atdd"
+
+
+# ---------------------------------------------------------------------------
+# csdlc init --skip-tea / --tea-only
+# ---------------------------------------------------------------------------
+
+
+class TestInitTea:
+    def test_init_skip_tea(self, runner, tmp_path):
+        """--skip-tea skips TEA bootstrap."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            Path("pyproject.toml").write_text("[project]\nname = 'test'\n")
+            result = runner.invoke(main, ["init", "--non-interactive", "--skip-tea"])
+            assert result.exit_code == 0
+            assert "Created" in result.output
+            # TEA bootstrap should not have run
+            assert "TEA framework scaffold" not in result.output
+
+    def test_init_tea_only_no_config(self, runner, tmp_path):
+        """--tea-only fails if config doesn't exist."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(main, ["init", "--tea-only"])
+            assert result.exit_code == 1
+            assert "config.yaml not found" in result.output
+
+
+# ---------------------------------------------------------------------------
+# csdlc setup-ci
+# ---------------------------------------------------------------------------
+
+
+class TestSetupCi:
+    def test_setup_ci_no_config(self, runner, tmp_path):
+        """setup-ci fails without config."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(main, ["setup-ci"])
+            assert result.exit_code == 1
+            assert "config.yaml not found" in result.output
+
+    def test_setup_ci_subcommand_exists(self, runner):
+        """setup-ci is a recognized subcommand."""
+        result = runner.invoke(main, ["--help"])
+        assert "setup-ci" in result.output

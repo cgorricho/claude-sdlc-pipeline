@@ -15,7 +15,7 @@ from claude_sdlc import __version__
 
 # Core invariant — pipeline step names used for Click choices at import time.
 # Matches Config.story.pipeline_steps defaults (not user-configurable).
-_PIPELINE_STEPS = ["create-story", "dev-story", "code-review", "trace"]
+_PIPELINE_STEPS = ["create-story", "atdd", "dev-story", "code-review", "trace"]
 
 # ---------------------------------------------------------------------------
 # Project type detection for `csdlc init`
@@ -76,6 +76,8 @@ def main():
 @click.option("--story", required=True, help="Story key, e.g. '1-3'")
 @click.option("--skip-create", is_flag=True, default=False,
               help="Skip create-story (story file already exists)")
+@click.option("--skip-atdd", is_flag=True, default=False,
+              help="Skip ATDD step (run without acceptance test generation)")
 @click.option("--skip-trace", is_flag=True, default=False,
               help="Skip optional trace workflow")
 @click.option("--review-mode", type=click.Choice(["A", "B"], case_sensitive=True),
@@ -90,7 +92,7 @@ def main():
               help="Stash uncommitted changes before starting (git stash)")
 @click.option("-v", "--verbose", is_flag=True, default=False,
               help="Stream full Claude output to terminal in real time")
-def run(story, skip_create, skip_trace, review_mode, resume, resume_from,
+def run(story, skip_create, skip_atdd, skip_trace, review_mode, resume, resume_from,
         dry_run, clean, verbose):
     """Execute the full pipeline for a story."""
     from claude_sdlc.orchestrator import run_pipeline
@@ -98,6 +100,7 @@ def run(story, skip_create, skip_trace, review_mode, resume, resume_from,
     run_pipeline(
         story,
         skip_create=skip_create,
+        skip_atdd=skip_atdd,
         skip_trace=skip_trace,
         resume=resume,
         resume_from=resume_from,
@@ -116,11 +119,26 @@ def run(story, skip_create, skip_trace, review_mode, resume, resume_from,
 @main.command()
 @click.option("--non-interactive", is_flag=True, default=False,
               help="Write config with all defaults, no prompts")
-def init(non_interactive):
+@click.option("--skip-tea", is_flag=True, default=False,
+              help="Skip TEA bootstrap (framework scaffold + test design)")
+@click.option("--tea-only", is_flag=True, default=False,
+              help="Run only TEA bootstrap (skip config generation)")
+def init(non_interactive, skip_tea, tea_only):
     """Generate .csdlc/config.yaml for this project."""
     cwd = Path.cwd()
     config_dir = cwd / ".csdlc"
     config_path = config_dir / "config.yaml"
+
+    if skip_tea and tea_only:
+        raise click.UsageError("--skip-tea and --tea-only are mutually exclusive.")
+
+    # --tea-only: skip config generation, jump to TEA bootstrap
+    if tea_only:
+        if not config_path.exists():
+            click.echo("ERROR: .csdlc/config.yaml not found. Run 'csdlc init' first.")
+            raise SystemExit(1)
+        _run_tea_bootstrap(cwd, config_path)
+        return
 
     # Guard against overwriting existing config
     if config_path.exists():
@@ -214,6 +232,71 @@ def init(non_interactive):
         gitignore.write_text(f"{gitignore_entry}\n")
         click.echo(f"Created .gitignore with '{gitignore_entry}'")
 
+    # TEA bootstrap (opt-out via --skip-tea)
+    if not skip_tea:
+        _run_tea_bootstrap(cwd, config_path)
+
+
+def _run_tea_bootstrap(cwd: Path, config_path: Path):
+    """Run TEA framework scaffold and test design as Claude sessions."""
+    from claude_sdlc.config import load_config
+    from claude_sdlc.runner import run_workflow
+
+    try:
+        config = load_config(config_path)
+    except Exception as e:
+        click.echo(f"WARNING: Could not load config for TEA bootstrap: {e}")
+        return
+
+    test_artifacts = Path(config.paths.test_artifacts)
+
+    # Check if TEA artifacts already exist
+    has_framework = any(test_artifacts.glob("*framework*")) if test_artifacts.exists() else False
+    has_test_design = any(test_artifacts.glob("*test-design*")) or any(test_artifacts.glob("*test-plan*")) if test_artifacts.exists() else False
+
+    if has_framework and has_test_design:
+        click.echo("TEA artifacts already present — skipping bootstrap.")
+        return
+
+    test_artifacts.mkdir(parents=True, exist_ok=True)
+    project_root = Path(config.project.root)
+
+    # Step 1: Framework scaffold
+    if not has_framework:
+        click.echo("Running TEA framework scaffold...")
+        prompt = "/bmad-testarch-framework\n\nScaffold the test framework for this project."
+        exit_code, _ = run_workflow(
+            "tea-framework",
+            prompt,
+            config.models.dev,
+            test_artifacts / "tea-framework-init.log",
+            project_root,
+            config,
+        )
+        if exit_code != 0:
+            click.echo(f"WARNING: TEA framework scaffold exited with code {exit_code}")
+    else:
+        click.echo("TEA framework scaffold already present — skipping.")
+
+    # Step 2: Test design
+    if not has_test_design:
+        click.echo("Running TEA test design...")
+        prompt = "/bmad-testarch-test-design\n\nGenerate the system-level test plan from project artifacts."
+        exit_code, _ = run_workflow(
+            "tea-test-design",
+            prompt,
+            config.models.dev,
+            test_artifacts / "tea-test-design-init.log",
+            project_root,
+            config,
+        )
+        if exit_code != 0:
+            click.echo(f"WARNING: TEA test design exited with code {exit_code}")
+    else:
+        click.echo("TEA test design already present — skipping.")
+
+    click.echo("TEA bootstrap complete.")
+
 
 # ---------------------------------------------------------------------------
 # csdlc validate
@@ -290,9 +373,73 @@ def validate():
                 click.echo(f"[FAIL] Plugin: '{name}' not found in claude_sdlc.plugins entry points")
                 all_passed = False
 
+    # Check 5: TEA readiness (informational — warn, don't fail)
+    # Use loaded config paths for consistency with _run_tea_bootstrap
+    try:
+        from claude_sdlc.config import load_config as _load_config
+        _cfg = _load_config(config_path)
+        test_artifacts_dir = Path(_cfg.paths.test_artifacts)
+    except Exception:
+        test_artifacts_dir = Path.cwd() / (raw.get("paths", {}).get("test_artifacts", "_bmad-output/test-artifacts") if raw else "_bmad-output/test-artifacts")
+    has_framework = any(test_artifacts_dir.glob("*framework*")) if test_artifacts_dir.exists() else False
+    has_test_design = (any(test_artifacts_dir.glob("*test-design*")) or any(test_artifacts_dir.glob("*test-plan*"))) if test_artifacts_dir.exists() else False
+
+    if has_framework and has_test_design:
+        click.echo("[PASS] TEA: framework scaffold present, test design present")
+    else:
+        missing = []
+        if not has_framework:
+            missing.append("framework scaffold")
+        if not has_test_design:
+            missing.append("test design")
+        click.echo(f"[WARN] TEA: missing {', '.join(missing)}. Run: csdlc init --tea-only")
+
     # Summary
     if all_passed:
         click.echo("\nAll checks passed.")
     else:
         click.echo("\nSome checks failed.")
         sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# csdlc setup-ci
+# ---------------------------------------------------------------------------
+
+
+@main.command("setup-ci")
+def setup_ci():
+    """Scaffold CI/CD pipeline configuration via TEA testarch-ci skill."""
+    config_path = Path.cwd() / ".csdlc" / "config.yaml"
+    if not config_path.exists():
+        click.echo("ERROR: .csdlc/config.yaml not found. Run 'csdlc init' first.")
+        raise SystemExit(1)
+
+    from claude_sdlc.config import load_config
+    from claude_sdlc.runner import run_workflow
+
+    try:
+        config = load_config(config_path)
+    except Exception as e:
+        click.echo(f"ERROR: Failed to load config: {e}")
+        raise SystemExit(1)
+
+    project_root = Path(config.project.root)
+    test_artifacts = Path(config.paths.test_artifacts)
+    test_artifacts.mkdir(parents=True, exist_ok=True)
+
+    click.echo("Running TEA CI scaffold (testarch-ci)...")
+    prompt = "/bmad-testarch-ci\n\nScaffold the CI/CD quality pipeline for this project."
+    exit_code, _ = run_workflow(
+        "setup-ci",
+        prompt,
+        config.models.dev,
+        test_artifacts / "setup-ci.log",
+        project_root,
+        config,
+    )
+    if exit_code != 0:
+        click.echo(f"CI scaffold failed with exit code {exit_code}")
+        sys.exit(exit_code)
+    else:
+        click.echo("CI scaffold complete.")
