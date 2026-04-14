@@ -1,18 +1,18 @@
 ---
-title: 'Story 3 — CLI Entry Point (csdlc)'
+title: 'Story 3 — CLI Entry Point (bsdlc)'
 type: 'feature'
 created: '2026-04-12'
 status: 'done'
 baseline_commit: '24382aa'
 context:
-  - '{project-root}/_bmad-output/planning-artifacts/claude-sdlc-pipeline-tech-spec.md'
+  - '{project-root}/_bmad-output/planning-artifacts/bmad-sdlc-tech-spec.md'
 ---
 
 <frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
 
 ## Intent
 
-**Problem:** The pipeline is invoked via `python automation/auto_story.py <args>` using argparse inside `orchestrator.py:main()`. The standalone package needs a proper CLI entry point (`csdlc`) with subcommands: `run`, `init`, and `validate`.
+**Problem:** The pipeline is invoked via `python automation/auto_story.py <args>` using argparse inside `orchestrator.py:main()`. The standalone package needs a proper CLI entry point (`bsdlc`) with subcommands: `run`, `init`, and `validate`.
 
 **Approach:** Replace the argparse block in `orchestrator.py` with a click-based CLI in `cli.py`. Extract the pipeline logic into `run_pipeline()` that accepts explicit parameters. Add `init` (interactive project-type detection + config generation) and `validate` (config + environment checks). Use Jinja2 template for config generation.
 
@@ -37,43 +37,43 @@ context:
 
 | Scenario | Input / State | Expected Output / Behavior | Error Handling |
 |----------|--------------|---------------------------|----------------|
-| `csdlc run --story 1-3` | Valid config, clean env | Calls `run_pipeline("1-3", ...)` with all defaults | N/A |
-| `csdlc run` (no story) | Missing required option | Click prints usage error | click handles automatically |
-| `csdlc init` in Python project | `pyproject.toml` exists | Detects Python, pre-fills `pytest`/build commands, prompts for rest | N/A |
-| `csdlc init` in Node project | `package.json` exists | Detects Node, pre-fills `npm run build`/`vitest` commands | N/A |
-| `csdlc init` no detection | No known project files | Uses generic defaults, prompts for all | N/A |
-| `csdlc init --non-interactive` | Any state | Writes config with detected defaults, no prompts | N/A |
-| `csdlc init` with existing config | `.csdlc/config.yaml` exists | Prompts to overwrite or abort | N/A |
-| `csdlc validate` all pass | Valid config, Claude on PATH, build resolves | Prints pass summary, exit 0 | N/A |
-| `csdlc validate` config missing | No `.csdlc/config.yaml` | Prints FAIL for config, exit 1 | N/A |
-| `csdlc validate` Claude not found | `claude` not on PATH | Prints FAIL for Claude binary, exit 1 | N/A |
+| `bsdlc run --story 1-3` | Valid config, clean env | Calls `run_pipeline("1-3", ...)` with all defaults | N/A |
+| `bsdlc run` (no story) | Missing required option | Click prints usage error | click handles automatically |
+| `bsdlc init` in Python project | `pyproject.toml` exists | Detects Python, pre-fills `pytest`/build commands, prompts for rest | N/A |
+| `bsdlc init` in Node project | `package.json` exists | Detects Node, pre-fills `npm run build`/`vitest` commands | N/A |
+| `bsdlc init` no detection | No known project files | Uses generic defaults, prompts for all | N/A |
+| `bsdlc init --non-interactive` | Any state | Writes config with detected defaults, no prompts | N/A |
+| `bsdlc init` with existing config | `.bsdlc/config.yaml` exists | Prompts to overwrite or abort | N/A |
+| `bsdlc validate` all pass | Valid config, Claude on PATH, build resolves | Prints pass summary, exit 0 | N/A |
+| `bsdlc validate` config missing | No `.bsdlc/config.yaml` | Prints FAIL for config, exit 1 | N/A |
+| `bsdlc validate` Claude not found | `claude` not on PATH | Prints FAIL for Claude binary, exit 1 | N/A |
 
 </frozen-after-approval>
 
 ## Code Map
 
-- `src/claude_sdlc/cli.py` -- REWRITE: Full click CLI with `run`, `init`, `validate` subcommands
-- `src/claude_sdlc/orchestrator.py` -- MODIFY: Extract `run_pipeline()` function, remove argparse block and `if __name__`
-- `templates/config.yaml.j2` -- NEW: Jinja2 template for `csdlc init` config generation
+- `src/bmad_sdlc/cli.py` -- REWRITE: Full click CLI with `run`, `init`, `validate` subcommands
+- `src/bmad_sdlc/orchestrator.py` -- MODIFY: Extract `run_pipeline()` function, remove argparse block and `if __name__`
+- `templates/config.yaml.j2` -- NEW: Jinja2 template for `bsdlc init` config generation
 - `pyproject.toml` -- MODIFY: Add `jinja2>=3.0` to dependencies
 - `tests/test_cli.py` -- NEW: Click CliRunner tests for all subcommands and edge cases
 
 ## Tasks & Acceptance
 
 **Execution:**
-- [x] `src/claude_sdlc/orchestrator.py` -- Extract a `run_pipeline(story_key, *, skip_create=False, skip_trace=False, resume=False, resume_from=None, review_mode=None, dry_run=False, clean=False, verbose=False)` function from lines 86+ of `main()`. Remove `import argparse`, the `ArgumentParser` block (lines 63-84), and `if __name__ == "__main__"` (lines 1254-1255). Keep `main()` as a thin wrapper calling `run_pipeline()` until Story 4 removes it.
-- [x] `src/claude_sdlc/cli.py` -- Rewrite stub: `@click.group() main`, `run` command with all flags (`--story` required option, `--skip-create`, `--skip-trace`, `--resume`, `--resume-from` with choices from `PIPELINE_STEPS`, `--review-mode` choice A/B, `--dry-run`, `--clean`, `--verbose`). `run` calls `orchestrator.run_pipeline()`. `init` command with `--non-interactive` flag: detect project type, prompt or use defaults, render `templates/config.yaml.j2` to `.csdlc/config.yaml`, create `.csdlc/runs/`, append to `.gitignore`. `validate` command: check config parse, Claude binary on PATH via `shutil.which()`, build command resolves, print pass/fail summary.
+- [x] `src/bmad_sdlc/orchestrator.py` -- Extract a `run_pipeline(story_key, *, skip_create=False, skip_trace=False, resume=False, resume_from=None, review_mode=None, dry_run=False, clean=False, verbose=False)` function from lines 86+ of `main()`. Remove `import argparse`, the `ArgumentParser` block (lines 63-84), and `if __name__ == "__main__"` (lines 1254-1255). Keep `main()` as a thin wrapper calling `run_pipeline()` until Story 4 removes it.
+- [x] `src/bmad_sdlc/cli.py` -- Rewrite stub: `@click.group() main`, `run` command with all flags (`--story` required option, `--skip-create`, `--skip-trace`, `--resume`, `--resume-from` with choices from `PIPELINE_STEPS`, `--review-mode` choice A/B, `--dry-run`, `--clean`, `--verbose`). `run` calls `orchestrator.run_pipeline()`. `init` command with `--non-interactive` flag: detect project type, prompt or use defaults, render `templates/config.yaml.j2` to `.bsdlc/config.yaml`, create `.bsdlc/runs/`, append to `.gitignore`. `validate` command: check config parse, Claude binary on PATH via `shutil.which()`, build command resolves, print pass/fail summary.
 - [x] `templates/config.yaml.j2` -- Create Jinja2 template matching tech spec Section 5 schema with variables for project name, build/test commands, model choices, workflow names, and paths.
 - [x] `pyproject.toml` -- Add `jinja2>=3.0` to `dependencies` list.
-- [x] `tests/test_cli.py` -- Tests using `click.testing.CliRunner`: `csdlc --help`, `csdlc run --help`, `csdlc run --story X` invokes pipeline, `csdlc init --non-interactive` generates config, `csdlc init` with existing config prompts overwrite, `csdlc validate` pass/fail scenarios.
+- [x] `tests/test_cli.py` -- Tests using `click.testing.CliRunner`: `bsdlc --help`, `bsdlc run --help`, `bsdlc run --story X` invokes pipeline, `bsdlc init --non-interactive` generates config, `bsdlc init` with existing config prompts overwrite, `bsdlc validate` pass/fail scenarios.
 
 **Acceptance Criteria:**
-- Given `csdlc run --story 1-3 --verbose --dry-run`, when invoked, then `run_pipeline` is called with `story_key="1-3"`, `verbose=True`, `dry_run=True` and all other flags at defaults
-- Given a directory with `pyproject.toml`, when `csdlc init --non-interactive` runs, then `.csdlc/config.yaml` is generated with Python-detected defaults and `.csdlc/runs/` is created
-- Given a valid config and `claude` on PATH, when `csdlc validate` runs, then all checks print PASS and exit code is 0
-- Given no `.csdlc/config.yaml`, when `csdlc validate` runs, then config check prints FAIL and exit code is 1
+- Given `bsdlc run --story 1-3 --verbose --dry-run`, when invoked, then `run_pipeline` is called with `story_key="1-3"`, `verbose=True`, `dry_run=True` and all other flags at defaults
+- Given a directory with `pyproject.toml`, when `bsdlc init --non-interactive` runs, then `.bsdlc/config.yaml` is generated with Python-detected defaults and `.bsdlc/runs/` is created
+- Given a valid config and `claude` on PATH, when `bsdlc validate` runs, then all checks print PASS and exit code is 0
+- Given no `.bsdlc/config.yaml`, when `bsdlc validate` runs, then config check prints FAIL and exit code is 1
 - Given `orchestrator.py` after changes, when searching for `argparse` or `if __name__`, then neither is found
-- Given `csdlc --help`, `csdlc run --help`, `csdlc init --help`, `csdlc validate --help`, when invoked, then each prints correct usage text
+- Given `bsdlc --help`, `bsdlc run --help`, `bsdlc init --help`, `bsdlc validate --help`, when invoked, then each prints correct usage text
 
 ## Design Notes
 
@@ -86,12 +86,12 @@ context:
 ## Verification
 
 **Commands:**
-- `csdlc --help` -- expected: prints group help with run/init/validate subcommands
-- `csdlc run --help` -- expected: lists all flags (--story, --skip-create, --skip-trace, etc.)
-- `csdlc init --non-interactive` -- expected: generates `.csdlc/config.yaml` (run in temp dir)
-- `csdlc validate` -- expected: prints check results with pass/fail
+- `bsdlc --help` -- expected: prints group help with run/init/validate subcommands
+- `bsdlc run --help` -- expected: lists all flags (--story, --skip-create, --skip-trace, etc.)
+- `bsdlc init --non-interactive` -- expected: generates `.bsdlc/config.yaml` (run in temp dir)
+- `bsdlc validate` -- expected: prints check results with pass/fail
 - `pytest tests/test_cli.py -v` -- expected: all tests pass
-- `ruff check src/claude_sdlc/cli.py` -- expected: passes
+- `ruff check src/bmad_sdlc/cli.py` -- expected: passes
 
 ## Spec Change Log
 
@@ -100,35 +100,35 @@ context:
 **CLI architecture and orchestrator integration**
 
 - Entry point — click group with run/init/validate subcommands, all flags preserved from argparse
-  [`cli.py:63`](../../src/claude_sdlc/cli.py#L63)
+  [`cli.py:63`](../../src/bmad_sdlc/cli.py#L63)
 
 - Run command wires all 9 flags into `run_pipeline()` via lazy import
-  [`cli.py:90`](../../src/claude_sdlc/cli.py#L90)
+  [`cli.py:90`](../../src/bmad_sdlc/cli.py#L90)
 
 - Orchestrator refactor — `run_pipeline()` replaces argparse-based `main()`, all `args.X` → params
-  [`orchestrator.py:62`](../../src/claude_sdlc/orchestrator.py#L62)
+  [`orchestrator.py:62`](../../src/bmad_sdlc/orchestrator.py#L62)
 
 - Legacy `main()` wrapper for backward compat until Story 4
-  [`orchestrator.py:869`](../../src/claude_sdlc/orchestrator.py#L869)
+  [`orchestrator.py:869`](../../src/bmad_sdlc/orchestrator.py#L869)
 
 **Init command — project detection and config generation**
 
 - Project type detection: package.json → Node, pyproject.toml → Python, go.mod → Go
-  [`cli.py:45`](../../src/claude_sdlc/cli.py#L45)
+  [`cli.py:45`](../../src/bmad_sdlc/cli.py#L45)
 
 - Init command with interactive/non-interactive paths, existing config guard, gitignore append
-  [`cli.py:116`](../../src/claude_sdlc/cli.py#L116)
+  [`cli.py:116`](../../src/bmad_sdlc/cli.py#L116)
 
 - Template resolution via `importlib.resources` for pip-installable discovery
-  [`cli.py:167`](../../src/claude_sdlc/cli.py#L167)
+  [`cli.py:167`](../../src/bmad_sdlc/cli.py#L167)
 
 - Jinja2 config template matching tech spec Section 5 schema
-  [`config.yaml.j2:1`](../../src/claude_sdlc/templates/config.yaml.j2#L1)
+  [`config.yaml.j2:1`](../../src/bmad_sdlc/templates/config.yaml.j2#L1)
 
 **Validate command — environment checks**
 
 - Validate with single YAML parse, null-safe value extraction, shlex error handling
-  [`cli.py:221`](../../src/claude_sdlc/cli.py#L221)
+  [`cli.py:221`](../../src/bmad_sdlc/cli.py#L221)
 
 **Configuration and tests**
 

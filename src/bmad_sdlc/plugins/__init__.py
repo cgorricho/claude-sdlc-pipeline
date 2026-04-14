@@ -1,5 +1,5 @@
 """
-plugins — Plugin system for claude-sdlc-pipeline.
+plugins — Plugin system for bmad-sdlc.
 
 Defines the PreReviewCheck protocol, CheckResult dataclass, and plugin
 loader that resolves plugins from config via importlib.metadata entry points.
@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from claude_sdlc.config import Config
+    from bmad_sdlc.config import Config
 
-log = logging.getLogger("claude_sdlc.plugins")
+log = logging.getLogger("bmad_sdlc.plugins")
 
 
 @dataclass
@@ -38,7 +38,7 @@ class PreReviewCheck(Protocol):
 def load_plugins(config: Config) -> list[PreReviewCheck]:
     """Load plugins listed in config.plugins via entry_points.
 
-    Resolves each plugin name against the ``claude_sdlc.plugins`` entry point
+    Resolves each plugin name against the ``bmad_sdlc.plugins`` entry point
     group. Unresolvable names log a warning and are skipped.
 
     Returns:
@@ -47,14 +47,14 @@ def load_plugins(config: Config) -> list[PreReviewCheck]:
     if not config.plugins:
         return []
 
-    eps = importlib.metadata.entry_points(group="claude_sdlc.plugins")
+    eps = importlib.metadata.entry_points(group="bmad_sdlc.plugins")
     ep_map = {ep.name: ep for ep in eps}
 
     plugins: list[PreReviewCheck] = []
     for name in config.plugins:
         ep = ep_map.get(name)
         if ep is None:
-            log.warning(f"Plugin '{name}' not found in claude_sdlc.plugins entry points — skipping")
+            log.warning(f"Plugin '{name}' not found in bmad_sdlc.plugins entry points — skipping")
             continue
         try:
             cls = ep.load()

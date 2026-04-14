@@ -18,9 +18,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from claude_sdlc.config import Config
+from bmad_sdlc.config import Config
 
-log = logging.getLogger("claude_sdlc.runner")
+log = logging.getLogger("bmad_sdlc.runner")
 
 
 @dataclass

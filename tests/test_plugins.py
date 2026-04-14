@@ -3,9 +3,9 @@
 import subprocess
 from unittest.mock import MagicMock, patch
 
-from claude_sdlc.config import Config
-from claude_sdlc.plugins import CheckResult, PreReviewCheck, load_plugins
-from claude_sdlc.plugins.drizzle_drift import DrizzleDriftCheck
+from bmad_sdlc.config import Config
+from bmad_sdlc.plugins import CheckResult, PreReviewCheck, load_plugins
+from bmad_sdlc.plugins.drizzle_drift import DrizzleDriftCheck
 
 
 def _default_config(**overrides) -> Config:
@@ -74,7 +74,7 @@ class TestLoadPlugins:
         result = load_plugins(config)
         assert result == []
 
-    @patch("claude_sdlc.plugins.importlib.metadata.entry_points")
+    @patch("bmad_sdlc.plugins.importlib.metadata.entry_points")
     def test_valid_plugin_loaded(self, mock_eps):
         mock_ep = MagicMock()
         mock_ep.name = "test_plugin"
@@ -92,14 +92,14 @@ class TestLoadPlugins:
         assert len(result) == 1
         assert result[0].name == "test_plugin"
 
-    @patch("claude_sdlc.plugins.importlib.metadata.entry_points")
+    @patch("bmad_sdlc.plugins.importlib.metadata.entry_points")
     def test_invalid_plugin_name_skipped(self, mock_eps):
         mock_eps.return_value = []
         config = _default_config(plugins=["nonexistent"])
         result = load_plugins(config)
         assert result == []
 
-    @patch("claude_sdlc.plugins.importlib.metadata.entry_points")
+    @patch("bmad_sdlc.plugins.importlib.metadata.entry_points")
     def test_plugin_load_error_skipped(self, mock_eps):
         mock_ep = MagicMock()
         mock_ep.name = "broken_plugin"
@@ -110,7 +110,7 @@ class TestLoadPlugins:
         result = load_plugins(config)
         assert result == []
 
-    @patch("claude_sdlc.plugins.importlib.metadata.entry_points")
+    @patch("bmad_sdlc.plugins.importlib.metadata.entry_points")
     def test_multiple_plugins_loaded_in_order(self, mock_eps):
         def make_ep(name):
             ep = MagicMock()
@@ -139,10 +139,10 @@ class TestLoadPlugins:
 
 class TestDrizzleDriftCheckRun:
     def _config(self, tmp_path):
-        from claude_sdlc.config import ProjectConfig
+        from bmad_sdlc.config import ProjectConfig
         return Config(project=ProjectConfig(root=str(tmp_path), name="test"))
 
-    @patch("claude_sdlc.plugins.drizzle_drift._sp.run")
+    @patch("bmad_sdlc.plugins.drizzle_drift._sp.run")
     def test_clean_no_schema_changes(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="No schema changes", stderr=""
@@ -151,7 +151,7 @@ class TestDrizzleDriftCheckRun:
         result = check.run("1-5", self._config(tmp_path))
         assert result.passed is True
 
-    @patch("claude_sdlc.plugins.drizzle_drift._sp.run")
+    @patch("bmad_sdlc.plugins.drizzle_drift._sp.run")
     def test_clean_nothing_to_generate(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="nothing to generate here", stderr=""
@@ -160,7 +160,7 @@ class TestDrizzleDriftCheckRun:
         result = check.run("1-5", self._config(tmp_path))
         assert result.passed is True
 
-    @patch("claude_sdlc.plugins.drizzle_drift._sp.run")
+    @patch("bmad_sdlc.plugins.drizzle_drift._sp.run")
     def test_drift_detected_migration(self, mock_run, tmp_path):
         # First call: db:generate detects drift; second call: git diff; third call: git checkout
         mock_run.side_effect = [
@@ -180,7 +180,7 @@ class TestDrizzleDriftCheckRun:
         assert "checkout" in checkout_call[0][0]
         assert "drizzle/0001_add_users.sql" in checkout_call[0][0]
 
-    @patch("claude_sdlc.plugins.drizzle_drift._sp.run")
+    @patch("bmad_sdlc.plugins.drizzle_drift._sp.run")
     def test_drift_detected_generated(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="Generated 3 files", stderr=""
@@ -189,7 +189,7 @@ class TestDrizzleDriftCheckRun:
         result = check.run("1-5", self._config(tmp_path))
         assert result.passed is False
 
-    @patch("claude_sdlc.plugins.drizzle_drift._sp.run")
+    @patch("bmad_sdlc.plugins.drizzle_drift._sp.run")
     def test_command_failure(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="npm ERR!"
@@ -199,7 +199,7 @@ class TestDrizzleDriftCheckRun:
         assert result.passed is False
         assert "exit 1" in result.message
 
-    @patch("claude_sdlc.plugins.drizzle_drift._sp.run")
+    @patch("bmad_sdlc.plugins.drizzle_drift._sp.run")
     def test_command_not_found(self, mock_run, tmp_path):
         mock_run.side_effect = FileNotFoundError()
         check = DrizzleDriftCheck()
@@ -207,7 +207,7 @@ class TestDrizzleDriftCheckRun:
         assert result.passed is False
         assert "not found" in result.message
 
-    @patch("claude_sdlc.plugins.drizzle_drift._sp.run")
+    @patch("bmad_sdlc.plugins.drizzle_drift._sp.run")
     def test_timeout(self, mock_run, tmp_path):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="npm", timeout=60)
         check = DrizzleDriftCheck()
@@ -215,7 +215,7 @@ class TestDrizzleDriftCheckRun:
         assert result.passed is False
         assert "timed out" in result.message
 
-    @patch("claude_sdlc.plugins.drizzle_drift._sp.run")
+    @patch("bmad_sdlc.plugins.drizzle_drift._sp.run")
     def test_clean_exit_zero_no_keywords(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="All good", stderr=""
@@ -231,7 +231,7 @@ class TestDrizzleDriftCheckRun:
 class TestOrchestratorPluginHook:
     def test_orchestrator_imports_load_plugins(self):
         """Verify orchestrator has load_plugins available for the hook."""
-        import claude_sdlc.orchestrator as orch
+        import bmad_sdlc.orchestrator as orch
         assert hasattr(orch, "load_plugins")
         assert orch.load_plugins is load_plugins
 
@@ -240,7 +240,7 @@ class TestOrchestratorPluginHook:
         result = load_plugins(config)
         assert result == []
 
-    @patch("claude_sdlc.plugins.importlib.metadata.entry_points")
+    @patch("bmad_sdlc.plugins.importlib.metadata.entry_points")
     def test_plugin_failure_produces_failed_check_result(self, mock_eps):
         """Simulate what happens when a plugin returns passed=False."""
         mock_plugin = MagicMock(spec=["name", "run"])

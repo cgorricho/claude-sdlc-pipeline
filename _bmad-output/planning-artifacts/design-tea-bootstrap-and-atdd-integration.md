@@ -23,7 +23,7 @@ This has two gaps:
    - `testarch-framework`: scaffolds test infrastructure (Playwright + Vitest config, directory structure, base fixtures)
    - `testarch-test-design`: generates system-level test plan from PRD + Architecture doc (test scenarios, quality attributes, coverage targets)
 
-   If a user does `pip install claude-sdlc-pipeline && csdlc run --story 1-1`, the trace step will fail because TEA was never bootstrapped.
+   If a user does `pip install bmad-sdlc && bsdlc run --story 1-1`, the trace step will fail because TEA was never bootstrapped.
 
 ---
 
@@ -52,14 +52,14 @@ Users who want the lean 4-step cycle can configure it:
 pipeline_steps: [create-story, dev-story, code-review, trace]
 ```
 
-### 2.2 TEA Bootstrap in `csdlc init`
+### 2.2 TEA Bootstrap in `bsdlc init`
 
-Extend the `csdlc init` flow to include TEA setup as the final steps:
+Extend the `bsdlc init` flow to include TEA setup as the final steps:
 
 ```
-csdlc init
+bsdlc init
   1. Detect project type (Node/Python/Go)          ← existing
-  2. Generate .csdlc/config.yaml                    ← existing
+  2. Generate .bsdlc/config.yaml                    ← existing
   3. Validate environment                           ← existing
   4. Run TEA framework scaffold (testarch-framework)   ← NEW
   5. Run TEA test design (testarch-test-design)        ← NEW
@@ -72,13 +72,13 @@ Behavior:
 - If `--skip-tea` flag is passed, skip bootstrap (for users who manage TEA separately)
 - `--non-interactive` mode runs TEA bootstrap with defaults (no prompts)
 
-### 2.3 TEA Health Check in `csdlc validate`
+### 2.3 TEA Health Check in `bsdlc validate`
 
-Add TEA readiness checks to `csdlc validate`:
+Add TEA readiness checks to `bsdlc validate`:
 
 ```
-$ csdlc validate
-  Config:     PASS — .csdlc/config.yaml parsed
+$ bsdlc validate
+  Config:     PASS — .bsdlc/config.yaml parsed
   Claude:     PASS — claude found on PATH
   Build:      PASS — npm run build resolves
   TEA:        PASS — framework scaffold present, test design present
@@ -89,8 +89,8 @@ If TEA is not set up:
 
 ```
   TEA:        FAIL — test framework not scaffolded
-              Run: csdlc init --tea-only
-              Or:  csdlc run with --skip-trace --skip-atdd
+              Run: bsdlc init --tea-only
+              Or:  bsdlc run with --skip-trace --skip-atdd
 ```
 
 ### 2.4 Config Changes
@@ -116,7 +116,7 @@ timeouts:
 New skip flag:
 
 ```
-csdlc run --story 1-3 --skip-atdd    # skip ATDD step (run 4-step cycle)
+bsdlc run --story 1-3 --skip-atdd    # skip ATDD step (run 4-step cycle)
 ```
 
 ### 2.5 Orchestrator Changes
@@ -132,23 +132,23 @@ The orchestrator already iterates `PIPELINE_STEPS` generically. Adding `atdd` re
 ```toml
 [project.optional-dependencies]
 tea = []       # marker — enables atdd + trace in default pipeline_steps
-ci = []        # marker — enables csdlc setup-ci command
+ci = []        # marker — enables bsdlc setup-ci command
 full = []      # tea + ci + drizzle
 ```
 
 These are markers for now — the actual skill files come from BMAD, not from pip. The extras gate:
-- Whether `csdlc init` runs TEA bootstrap
+- Whether `bsdlc init` runs TEA bootstrap
 - Whether `atdd` appears in the default `pipeline_steps`
-- Whether `csdlc setup-ci` is available as a subcommand
+- Whether `bsdlc setup-ci` is available as a subcommand
 
 ---
 
-## 3. `csdlc setup-ci` (Separate Subcommand)
+## 3. `bsdlc setup-ci` (Separate Subcommand)
 
 CI scaffold (`testarch-ci`) is a one-time Phase A action, not per-story. It belongs as its own command:
 
 ```
-csdlc setup-ci
+bsdlc setup-ci
 ```
 
 This runs the `testarch-ci` skill to generate CI/CD pipeline configuration (GitHub Actions, quality gates, burn-in). Requires a real project to scaffold against (package.json / pyproject.toml must exist).
@@ -157,19 +157,19 @@ This runs the `testarch-ci` skill to generate CI/CD pipeline configuration (GitH
 
 ## 4. Phase A / Phase B / Phase C Mapping
 
-How the Atlas testing architecture maps to `csdlc` commands:
+How the Atlas testing architecture maps to `bsdlc` commands:
 
-| Atlas Phase | Step | `csdlc` Surface |
+| Atlas Phase | Step | `bsdlc` Surface |
 |-------------|------|-----------------|
-| A1 | testarch-framework | `csdlc init` (step 4) |
-| A2 | testarch-test-design | `csdlc init` (step 5) |
-| A3 | testarch-ci | `csdlc setup-ci` |
-| B1 | create-story | `csdlc run` step 1 |
-| B2 | atdd | `csdlc run` step 2 |
-| B3 | dev-story | `csdlc run` step 3 |
-| B4 | code-review | `csdlc run` step 4 |
-| B5 | trace | `csdlc run` step 5 |
-| C1-C5 | Periodic workflows | Future: `csdlc audit` / `csdlc review` / `csdlc retro` |
+| A1 | testarch-framework | `bsdlc init` (step 4) |
+| A2 | testarch-test-design | `bsdlc init` (step 5) |
+| A3 | testarch-ci | `bsdlc setup-ci` |
+| B1 | create-story | `bsdlc run` step 1 |
+| B2 | atdd | `bsdlc run` step 2 |
+| B3 | dev-story | `bsdlc run` step 3 |
+| B4 | code-review | `bsdlc run` step 4 |
+| B5 | trace | `bsdlc run` step 5 |
+| C1-C5 | Periodic workflows | Future: `bsdlc audit` / `bsdlc review` / `bsdlc retro` |
 
 ---
 
@@ -177,11 +177,11 @@ How the Atlas testing architecture maps to `csdlc` commands:
 
 ### For existing users (4-step cycle)
 - `pipeline_steps` in their config stays as-is — no breakage
-- `csdlc validate` will warn about missing TEA but won't block
+- `bsdlc validate` will warn about missing TEA but won't block
 
 ### For new users
-- `csdlc init` sets up TEA and defaults to 5-step cycle
-- First `csdlc run` just works — ATDD and trace both have their prerequisites
+- `bsdlc init` sets up TEA and defaults to 5-step cycle
+- First `bsdlc run` just works — ATDD and trace both have their prerequisites
 
 ### For the pipeline codebase
 - Orchestrator loop is already generic over `PIPELINE_STEPS` — adding a step is config + prompt + contract
@@ -195,12 +195,12 @@ How the Atlas testing architecture maps to `csdlc` commands:
 - Git worktree isolation (Phase 3)
 - Epic-level DAG scheduling (Phase 3)
 - Token usage tracking (deferred)
-- Phase C periodic workflows in `csdlc` (future scope)
+- Phase C periodic workflows in `bsdlc` (future scope)
 
 ---
 
 ## 7. Open Questions
 
-1. Should `csdlc init` TEA bootstrap be opt-out (`--skip-tea`) or opt-in (`--with-tea`)? Current design: opt-out (runs by default).
+1. Should `bsdlc init` TEA bootstrap be opt-out (`--skip-tea`) or opt-in (`--with-tea`)? Current design: opt-out (runs by default).
 2. Should the ATDD contract validator enforce that generated tests actually fail (red phase), or just that test files exist?
 3. Timeout for ATDD step — 600s is a guess. Needs real execution data.

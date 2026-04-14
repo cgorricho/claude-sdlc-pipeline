@@ -5,7 +5,7 @@ created: '2026-04-12'
 status: 'done'
 baseline_commit: '857222e'
 context:
-  - '{project-root}/_bmad-output/planning-artifacts/claude-sdlc-pipeline-tech-spec.md'
+  - '{project-root}/_bmad-output/planning-artifacts/bmad-sdlc-tech-spec.md'
 ---
 
 <frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
@@ -51,19 +51,19 @@ context:
 
 ## Code Map
 
-- `src/claude_sdlc/plugins/__init__.py` -- REWRITE: Define `CheckResult` dataclass, `PreReviewCheck` Protocol, `load_plugins(config)` function
-- `src/claude_sdlc/plugins/drizzle_drift.py` -- CREATE: `DrizzleDriftCheck` implementing `PreReviewCheck` with migrated drift logic
-- `src/claude_sdlc/orchestrator.py` -- MODIFY: Replace line 302 placeholder comment with plugin hook invocation
-- `src/claude_sdlc/cli.py` -- MODIFY: Add Check 4 to `validate` command — verify configured plugins can be loaded
+- `src/bmad_sdlc/plugins/__init__.py` -- REWRITE: Define `CheckResult` dataclass, `PreReviewCheck` Protocol, `load_plugins(config)` function
+- `src/bmad_sdlc/plugins/drizzle_drift.py` -- CREATE: `DrizzleDriftCheck` implementing `PreReviewCheck` with migrated drift logic
+- `src/bmad_sdlc/orchestrator.py` -- MODIFY: Replace line 302 placeholder comment with plugin hook invocation
+- `src/bmad_sdlc/cli.py` -- MODIFY: Add Check 4 to `validate` command — verify configured plugins can be loaded
 - `tests/test_plugins.py` -- CREATE: Unit tests for plugin loading, protocol compliance, hook invocation, edge cases
 
 ## Tasks & Acceptance
 
 **Execution:**
-- [x] `src/claude_sdlc/plugins/__init__.py` -- Define `CheckResult(passed: bool, message: str = "")` dataclass, `PreReviewCheck` Protocol with `name: str` attribute and `run(self, story_key: str, config: Config) -> CheckResult` method, and `load_plugins(config: Config) -> list[PreReviewCheck]` that resolves `config.plugins` names against `importlib.metadata.entry_points(group="claude_sdlc.plugins")`. Unresolvable names log a warning and are skipped.
-- [x] `src/claude_sdlc/plugins/drizzle_drift.py` -- Create `DrizzleDriftCheck` class with `name = "drizzle_drift_check"`. The `run()` method: (1) runs `config.build.command`-style subprocess (default: `npm run db:generate`) in project root with 60s timeout, (2) checks stdout for "No schema changes" → passed, (3) checks for "migration"/"generated" keywords → drift detected, runs `git checkout` cleanup, returns failed, (4) handles `FileNotFoundError` and `TimeoutExpired` gracefully.
-- [x] `src/claude_sdlc/orchestrator.py` -- Replace `# Plugin hook: pre_review_checks (see Story 5)` at line 302 with: import and call `load_plugins(config)`, iterate results, call each plugin's `run(story_key, config)`, if any returns `CheckResult(passed=False)` then call `fail_step(run_log, step_log, run_log_path, f"Plugin {plugin.name}: {result.message}")`.
-- [x] `src/claude_sdlc/cli.py` -- Add Check 4 after build command check: load raw `plugins` list from config YAML, attempt `importlib.metadata.entry_points(group="claude_sdlc.plugins")` resolution for each, report `[PASS]`/`[FAIL]` per plugin name. If no plugins configured, report `[PASS] Plugins: none configured`.
+- [x] `src/bmad_sdlc/plugins/__init__.py` -- Define `CheckResult(passed: bool, message: str = "")` dataclass, `PreReviewCheck` Protocol with `name: str` attribute and `run(self, story_key: str, config: Config) -> CheckResult` method, and `load_plugins(config: Config) -> list[PreReviewCheck]` that resolves `config.plugins` names against `importlib.metadata.entry_points(group="bmad_sdlc.plugins")`. Unresolvable names log a warning and are skipped.
+- [x] `src/bmad_sdlc/plugins/drizzle_drift.py` -- Create `DrizzleDriftCheck` class with `name = "drizzle_drift_check"`. The `run()` method: (1) runs `config.build.command`-style subprocess (default: `npm run db:generate`) in project root with 60s timeout, (2) checks stdout for "No schema changes" → passed, (3) checks for "migration"/"generated" keywords → drift detected, runs `git checkout` cleanup, returns failed, (4) handles `FileNotFoundError` and `TimeoutExpired` gracefully.
+- [x] `src/bmad_sdlc/orchestrator.py` -- Replace `# Plugin hook: pre_review_checks (see Story 5)` at line 302 with: import and call `load_plugins(config)`, iterate results, call each plugin's `run(story_key, config)`, if any returns `CheckResult(passed=False)` then call `fail_step(run_log, step_log, run_log_path, f"Plugin {plugin.name}: {result.message}")`.
+- [x] `src/bmad_sdlc/cli.py` -- Add Check 4 after build command check: load raw `plugins` list from config YAML, attempt `importlib.metadata.entry_points(group="bmad_sdlc.plugins")` resolution for each, report `[PASS]`/`[FAIL]` per plugin name. If no plugins configured, report `[PASS] Plugins: none configured`.
 - [x] `tests/test_plugins.py` -- Test `CheckResult` construction; test `load_plugins` with empty config returns `[]`; test `load_plugins` with invalid plugin name logs warning; test `DrizzleDriftCheck` satisfies `PreReviewCheck` protocol (has `name`, `run` method); test mock plugin integration with orchestrator hook (patch `load_plugins` to return a mock, verify `run()` is called with correct args); test plugin failure triggers `fail_step`.
 
 **Acceptance Criteria:**
@@ -71,7 +71,7 @@ context:
 - Given `plugins: ["drizzle_drift_check"]` with entry point registered, when `load_plugins(config)` is called, then it returns a list containing a `DrizzleDriftCheck` instance
 - Given the orchestrator at the dev-story hook point, when plugins are loaded and return `CheckResult(passed=True)`, then pipeline continues to code-review unchanged
 - Given a plugin returning `CheckResult(passed=False)`, when the orchestrator runs it, then `fail_step` is called and pipeline exits with code 1
-- Given `csdlc validate` with plugins listed, when run, then each plugin entry point resolution is checked and reported
+- Given `bsdlc validate` with plugins listed, when run, then each plugin entry point resolution is checked and reported
 - Given `pytest tests/test_plugins.py -v`, when run, then all tests pass
 
 ## Spec Change Log
@@ -80,37 +80,37 @@ context:
 
 **Plugin config vs DrizzleDriftCheck config:** The Drizzle plugin needs a command and a working directory. Rather than adding a plugin-specific config section, the plugin should define its own defaults (command: `npm run db:generate`, cwd: project root) and document that users can override these by subclassing or by future plugin-config support. This keeps the Config dataclass unchanged for Story 5.
 
-**Entry point resolution strategy:** `load_plugins()` iterates `config.plugins` (a list of string names), looks each up in the `claude_sdlc.plugins` entry point group, instantiates the class, and returns the list. This means the bundled `drizzle_drift_check` works via the same mechanism as third-party plugins — no special-casing.
+**Entry point resolution strategy:** `load_plugins()` iterates `config.plugins` (a list of string names), looks each up in the `bmad_sdlc.plugins` entry point group, instantiates the class, and returns the list. This means the bundled `drizzle_drift_check` works via the same mechanism as third-party plugins — no special-casing.
 
 ## Verification
 
 **Commands:**
 - `pytest tests/test_plugins.py -v` -- expected: all tests pass
 - `pytest tests/ -v` -- expected: no regressions in existing tests
-- `ruff check src/claude_sdlc/plugins/ tests/test_plugins.py` -- expected: no lint errors
+- `ruff check src/bmad_sdlc/plugins/ tests/test_plugins.py` -- expected: no lint errors
 
 ## Suggested Review Order
 
 **Protocol & loader (the design center)**
 
 - Protocol + dataclass define the plugin contract; entry point for understanding the system
-  [`__init__.py:22`](../../src/claude_sdlc/plugins/__init__.py#L22)
+  [`__init__.py:22`](../../src/bmad_sdlc/plugins/__init__.py#L22)
 
 - Loader resolves config names against entry_points; graceful skip on failure
-  [`__init__.py:38`](../../src/claude_sdlc/plugins/__init__.py#L38)
+  [`__init__.py:38`](../../src/bmad_sdlc/plugins/__init__.py#L38)
 
 **Bundled plugin**
 
 - Drizzle drift check migrated from original; scoped git cleanup on drift detection
-  [`drizzle_drift.py:27`](../../src/claude_sdlc/plugins/drizzle_drift.py#L27)
+  [`drizzle_drift.py:27`](../../src/bmad_sdlc/plugins/drizzle_drift.py#L27)
 
 **Pipeline integration**
 
 - Hook wired at dev-story→code-review boundary; first failure calls fail_step
-  [`orchestrator.py:303`](../../src/claude_sdlc/orchestrator.py#L303)
+  [`orchestrator.py:303`](../../src/bmad_sdlc/orchestrator.py#L303)
 
 - Validate command Check 4 resolves each configured plugin entry point
-  [`cli.py:270`](../../src/claude_sdlc/cli.py#L270)
+  [`cli.py:270`](../../src/bmad_sdlc/cli.py#L270)
 
 **Tests**
 

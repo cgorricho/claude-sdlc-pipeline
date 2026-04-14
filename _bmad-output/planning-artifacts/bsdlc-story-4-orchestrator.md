@@ -11,7 +11,7 @@
 
 ### Problem Statement
 
-`src/claude_sdlc/orchestrator.py` (1,255 lines, formerly `auto_story.py`) is the heart of the pipeline. It currently imports ~30 module-level constants from `config.py` and contains hardcoded references to project-specific paths (`packages/`, `e2e/`), commands (`npm run db:generate`), and patterns (`node_modules`, `.turbo`). These must all be replaced with Config-based access.
+`src/bmad_sdlc/orchestrator.py` (1,255 lines, formerly `auto_story.py`) is the heart of the pipeline. It currently imports ~30 module-level constants from `config.py` and contains hardcoded references to project-specific paths (`packages/`, `e2e/`), commands (`npm run db:generate`), and patterns (`node_modules`, `.turbo`). These must all be replaced with Config-based access.
 
 ### Solution
 
@@ -22,7 +22,7 @@ This is a **targeted refactor of one large file** — the core orchestration log
 ### Scope
 
 **In Scope:**
-- Replace all `from claude_sdlc.config import CONSTANT` with `from claude_sdlc.config import get_config`
+- Replace all `from bmad_sdlc.config import CONSTANT` with `from bmad_sdlc.config import get_config`
 - Replace every constant reference with `config.X.Y` access
 - Remove `run_schema_drift_check()` function (moves to Story 5 plugin)
 - Replace hardcoded directory filters with configurable patterns
@@ -42,7 +42,7 @@ This is a **targeted refactor of one large file** — the core orchestration log
 
 Current: imports `SPRINT_STATUS`, `IMPL_ARTIFACTS`, `RUNS_DIR`, `DEV_MODEL`, `REVIEW_MODEL`, `WORKFLOWS`, `STEP_TIMEOUTS`, `STEP_MODES`, etc. from config
 
-Target: single import `from claude_sdlc.config import get_config`, then `config = get_config()` at function entry points
+Target: single import `from bmad_sdlc.config import get_config`, then `config = get_config()` at function entry points
 
 ### Workflow invocations (lines 211, 264, 625, 808) — UPDATE REFERENCES
 
@@ -79,7 +79,7 @@ Every `PROJECT_ROOT / "_bmad-output/..."` pattern → `config.paths.*`
 
 ## Implementation Tasks
 
-1. Replace the import block: `from claude_sdlc.config import get_config` only
+1. Replace the import block: `from bmad_sdlc.config import get_config` only
 2. Add `config = get_config()` at the top of every function that needs config (or pass it as parameter — prefer parameter passing for testability)
 3. Replace every `SPRINT_STATUS` → `config.paths.sprint_status`, `IMPL_ARTIFACTS` → `config.paths.impl_artifacts`, `PLANNING_ARTIFACTS` → `config.paths.planning_artifacts`, `TEST_ARTIFACTS` → `config.paths.test_artifacts`
 4. Replace `DEV_MODEL` → `config.models.dev`, `REVIEW_MODEL` → `config.models.review`
@@ -117,6 +117,6 @@ Every `PROJECT_ROOT / "_bmad-output/..."` pattern → `config.paths.*`
 
 ## References
 
-- Master tech spec: `_bmad-output/planning-artifacts/claude-sdlc-pipeline-tech-spec.md` (Sections 8, 10)
-- File to refactor: `src/claude_sdlc/orchestrator.py`
-- Config system: `src/claude_sdlc/config.py` (from Story 2)
+- Master tech spec: `_bmad-output/planning-artifacts/bmad-sdlc-tech-spec.md` (Sections 8, 10)
+- File to refactor: `src/bmad_sdlc/orchestrator.py`
+- Config system: `src/bmad_sdlc/config.py` (from Story 2)

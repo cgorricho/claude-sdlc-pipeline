@@ -15,7 +15,7 @@ The Drizzle ORM schema drift check was removed from `orchestrator.py` in Story 4
 
 ### Solution
 
-Implement a `PreReviewCheck` protocol in `src/claude_sdlc/plugins.py`, a plugin loader that reads from config, and migrate the Drizzle drift check into `src/claude_sdlc/plugins/drizzle_drift.py` as the first bundled plugin. Wire the hook point in `orchestrator.py` where the placeholder was left in Story 4.
+Implement a `PreReviewCheck` protocol in `src/bmad_sdlc/plugins.py`, a plugin loader that reads from config, and migrate the Drizzle drift check into `src/bmad_sdlc/plugins/drizzle_drift.py` as the first bundled plugin. Wire the hook point in `orchestrator.py` where the placeholder was left in Story 4.
 
 ### Scope
 
@@ -51,7 +51,7 @@ This logic must be **preserved exactly** in the plugin, but with paths/commands 
 
 ## Implementation Tasks
 
-1. Rewrite `src/claude_sdlc/plugins.py` (currently empty placeholder from Story 1):
+1. Rewrite `src/bmad_sdlc/plugins.py` (currently empty placeholder from Story 1):
    ```python
    @dataclass
    class CheckResult:
@@ -66,7 +66,7 @@ This logic must be **preserved exactly** in the plugin, but with paths/commands 
        """Load plugins listed in config.plugins via entry_points."""
    ```
 
-2. Create `src/claude_sdlc/plugins/drizzle_drift.py`:
+2. Create `src/bmad_sdlc/plugins/drizzle_drift.py`:
    - Class `DrizzleDriftCheck` implementing `PreReviewCheck`
    - `name = "drizzle_drift_check"`
    - `run()` method containing the migrated logic from the original function
@@ -74,8 +74,8 @@ This logic must be **preserved exactly** in the plugin, but with paths/commands 
 
 3. Register the bundled plugin in `pyproject.toml`:
    ```toml
-   [project.entry-points."claude_sdlc.plugins"]
-   drizzle_drift_check = "claude_sdlc.plugins.drizzle_drift:DrizzleDriftCheck"
+   [project.entry-points."bmad_sdlc.plugins"]
+   drizzle_drift_check = "bmad_sdlc.plugins.drizzle_drift:DrizzleDriftCheck"
    ```
 
 4. Wire the hook in `orchestrator.py`:
@@ -85,7 +85,7 @@ This logic must be **preserved exactly** in the plugin, but with paths/commands 
    - Run each plugin's `run()` method
    - If any returns `CheckResult(passed=False)`, log the message and handle (fail the step or warn, based on existing escalation logic)
 
-5. Add `csdlc validate` plugin check: when `validate` runs (Story 3), also check that plugins listed in config can be loaded
+5. Add `bsdlc validate` plugin check: when `validate` runs (Story 3), also check that plugins listed in config can be loaded
 
 6. Create `tests/test_plugins.py`:
    - Test `CheckResult` dataclass
@@ -101,7 +101,7 @@ This logic must be **preserved exactly** in the plugin, but with paths/commands 
 
 **AC-1**: `PreReviewCheck` protocol defined in `plugins.py` with `name` attribute, `run()` method returning `CheckResult`
 
-**AC-2**: `load_plugins()` resolves plugins from config via `importlib.metadata.entry_points(group="claude_sdlc.plugins")`
+**AC-2**: `load_plugins()` resolves plugins from config via `importlib.metadata.entry_points(group="bmad_sdlc.plugins")`
 
 **AC-3**: `DrizzleDriftCheck` in `drizzle_drift.py` implements `PreReviewCheck` — preserves the exact drift detection logic from the original `run_schema_drift_check()` function
 
@@ -115,7 +115,7 @@ This logic must be **preserved exactly** in the plugin, but with paths/commands 
 
 ## References
 
-- Master tech spec: `_bmad-output/planning-artifacts/claude-sdlc-pipeline-tech-spec.md` (Section 7)
+- Master tech spec: `_bmad-output/planning-artifacts/bmad-sdlc-tech-spec.md` (Section 7)
 - Original function: `/home/cgorricho/apps/who_else_is_here/automation/auto_story.py` lines 1137-1188
 - Plugin protocol: tech spec Section 7, Protocol definition
-- Orchestrator hook point: `src/claude_sdlc/orchestrator.py` (Story 4 placeholder)
+- Orchestrator hook point: `src/bmad_sdlc/orchestrator.py` (Story 4 placeholder)

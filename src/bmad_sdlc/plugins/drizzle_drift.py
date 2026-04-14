@@ -12,12 +12,12 @@ import subprocess as _sp
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from claude_sdlc.plugins import CheckResult
+from bmad_sdlc.plugins import CheckResult
 
 if TYPE_CHECKING:
-    from claude_sdlc.config import Config
+    from bmad_sdlc.config import Config
 
-log = logging.getLogger("claude_sdlc.plugins.drizzle_drift")
+log = logging.getLogger("bmad_sdlc.plugins.drizzle_drift")
 
 # Defaults — users can subclass to override
 _DEFAULT_COMMAND = ["npm", "run", "db:generate"]

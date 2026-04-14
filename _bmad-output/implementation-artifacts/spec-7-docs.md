@@ -5,14 +5,14 @@ created: '2026-04-12'
 status: 'done'
 baseline_commit: '8060aea'
 context:
-  - '{project-root}/_bmad-output/planning-artifacts/claude-sdlc-pipeline-tech-spec.md'
+  - '{project-root}/_bmad-output/planning-artifacts/bmad-sdlc-tech-spec.md'
 ---
 
 <frozen-after-approval reason="human-owned intent -- do not modify unless human renegotiates">
 
 ## Intent
 
-**Problem:** The standalone `claude-sdlc-pipeline` package (Stories 1-6 complete) has no user-facing documentation. Users cannot discover how to install, configure, run, write plugins, or migrate from the embedded `automation/` directory.
+**Problem:** The standalone `bmad-sdlc` package (Stories 1-6 complete) has no user-facing documentation. Users cannot discover how to install, configure, run, write plugins, or migrate from the embedded `automation/` directory.
 
 **Approach:** Create a comprehensive `README.md` covering value proposition, install, quickstart, CLI reference, full config reference (verified against Config dataclass), pipeline steps, review modes, plugin authoring guide (using DrizzleDriftCheck as example), and a migration guide from embedded to standalone.
 
@@ -36,12 +36,12 @@ context:
 ## Code Map
 
 - `README.md` -- Target file: comprehensive project documentation (new file)
-- `src/claude_sdlc/config.py` -- Source of truth for config reference section (Config dataclass, all nested dataclasses, defaults)
-- `src/claude_sdlc/cli.py` -- Source of truth for CLI reference section (commands, flags, defaults)
-- `src/claude_sdlc/plugins/__init__.py` -- Source of truth for plugin protocol (`PreReviewCheck`, `CheckResult`, `load_plugins`)
-- `src/claude_sdlc/plugins/drizzle_drift.py` -- Example plugin for authoring guide
-- `src/claude_sdlc/orchestrator.py` -- Source of truth for pipeline steps and review mode behavior
-- `src/claude_sdlc/runner.py` -- Source of truth for review mode auto-selection and safety invariants
+- `src/bmad_sdlc/config.py` -- Source of truth for config reference section (Config dataclass, all nested dataclasses, defaults)
+- `src/bmad_sdlc/cli.py` -- Source of truth for CLI reference section (commands, flags, defaults)
+- `src/bmad_sdlc/plugins/__init__.py` -- Source of truth for plugin protocol (`PreReviewCheck`, `CheckResult`, `load_plugins`)
+- `src/bmad_sdlc/plugins/drizzle_drift.py` -- Example plugin for authoring guide
+- `src/bmad_sdlc/orchestrator.py` -- Source of truth for pipeline steps and review mode behavior
+- `src/bmad_sdlc/runner.py` -- Source of truth for review mode auto-selection and safety invariants
 - `pyproject.toml` -- Package name, dependencies, entry_points for install and plugin registration sections
 
 ## Tasks & Acceptance
@@ -53,10 +53,10 @@ context:
 - [x] Verify plugin guide -- Confirm `PreReviewCheck` protocol signature and `CheckResult` fields match `plugins/__init__.py`
 
 **Acceptance Criteria:**
-- Given a new user, when they read README, then they can install (`pip install -e .`), init (`csdlc init`), validate (`csdlc validate`), and run (`csdlc run --story <key>`) without external help
+- Given a new user, when they read README, then they can install (`pip install -e .`), init (`bsdlc init`), validate (`bsdlc validate`), and run (`bsdlc run --story <key>`) without external help
 - Given the Config Reference section, when compared field-by-field to Config dataclass, then every YAML key has correct type, default, and description
 - Given the Plugin Authoring Guide, when followed step-by-step, then the user understands how to implement `PreReviewCheck`, register via entry_points, and sees DrizzleDriftCheck as a working example
-- Given the Migration Guide, when followed by an embedded `automation/` user, then they can transition to standalone `csdlc` with no behavior change
+- Given the Migration Guide, when followed by an embedded `automation/` user, then they can transition to standalone `bsdlc` with no behavior change
 
 ## Spec Change Log
 
@@ -64,7 +64,7 @@ context:
 
 **Manual checks:**
 - Config reference section lists every field from Config, PathsConfig, ModelsConfig, ClaudeConfig, CodexConfig, BuildConfig, TestConfig, ReviewConfig, SafetyConfig, StoryConfig with correct defaults
-- CLI section documents `csdlc run` (all flags), `csdlc init` (`--non-interactive`), `csdlc validate`
+- CLI section documents `bsdlc run` (all flags), `bsdlc init` (`--non-interactive`), `bsdlc validate`
 - Plugin guide shows `PreReviewCheck` protocol, `CheckResult`, entry_points registration
 - Migration guide covers: install, init, config adjustment, verify dry-run, remove automation/, update scripts
 
@@ -85,5 +85,5 @@ context:
 - Plugin authoring guide — protocol, example (DrizzleDriftCheck), and registration
   [`README.md:279`](../../README.md#L279)
 
-- Migration guide — 6-step transition from embedded automation/ to standalone csdlc
+- Migration guide — 6-step transition from embedded automation/ to standalone bsdlc
   [`README.md:353`](../../README.md#L353)

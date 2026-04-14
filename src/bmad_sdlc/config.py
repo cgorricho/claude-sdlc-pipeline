@@ -1,7 +1,7 @@
 """
-config.py — YAML-based configuration system for claude-sdlc-pipeline.
+config.py — YAML-based configuration system for bmad-sdlc.
 
-Loads project configuration from `.csdlc/config.yaml` into a frozen Config
+Loads project configuration from `.bsdlc/config.yaml` into a frozen Config
 dataclass hierarchy. All downstream code accesses configuration through
 `get_config()` returning an immutable Config instance.
 
@@ -20,7 +20,7 @@ from typing import Any
 
 import yaml
 
-log = logging.getLogger("claude_sdlc.config")
+log = logging.getLogger("bmad_sdlc.config")
 
 # ---------------------------------------------------------------------------
 # Nested frozen dataclasses matching tech spec Section 5 YAML schema
@@ -43,7 +43,7 @@ class PathsConfig:
     impl_artifacts: str = "_bmad-output/implementation-artifacts"
     planning_artifacts: str = "_bmad-output/planning-artifacts"
     test_artifacts: str = "_bmad-output/test-artifacts"
-    runs: str = ".csdlc/runs"
+    runs: str = ".bsdlc/runs"
 
 
 @dataclass(frozen=True)
@@ -312,7 +312,7 @@ def load_config(path: Path) -> Config:
     """Load and validate configuration from a YAML file.
 
     Args:
-        path: Path to the .csdlc/config.yaml file.
+        path: Path to the .bsdlc/config.yaml file.
 
     Returns:
         A frozen Config instance with all interpolation resolved.
@@ -373,7 +373,7 @@ def load_config(path: Path) -> Config:
     # Resolve project root relative to config file
     project_section = kwargs.get("project", ProjectConfig())
     raw_root = project_section.root if isinstance(project_section, ProjectConfig) else "."
-    config_dir = path.parent  # .csdlc/
+    config_dir = path.parent  # .bsdlc/
     project_root = str((config_dir / raw_root).resolve())
 
     # Update project with resolved root
@@ -417,7 +417,7 @@ def get_config(config_path: Path | None = None) -> Config:
 
     Args:
         config_path: Optional explicit path. If None, uses
-            PROJECT_ROOT / ".csdlc" / "config.yaml".
+            PROJECT_ROOT / ".bsdlc" / "config.yaml".
 
     Returns:
         Frozen Config instance.
@@ -427,7 +427,7 @@ def get_config(config_path: Path | None = None) -> Config:
         return _config_instance
 
     if config_path is None:
-        config_path = _PROJECT_ROOT / ".csdlc" / "config.yaml"
+        config_path = _PROJECT_ROOT / ".bsdlc" / "config.yaml"
 
     _config_instance = load_config(config_path)
     return _config_instance

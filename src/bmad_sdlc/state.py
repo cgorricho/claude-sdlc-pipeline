@@ -9,7 +9,7 @@ import re
 import yaml
 from pathlib import Path
 
-from claude_sdlc.config import Config
+from bmad_sdlc.config import Config
 
 
 def read_sprint_status(path: Path) -> dict:

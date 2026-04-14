@@ -12,8 +12,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude_sdlc.config import Config
-from claude_sdlc.orchestrator import (
+from bmad_sdlc.config import Config
+from bmad_sdlc.orchestrator import (
     determine_resume_step,
     should_run_step,
     parse_review_findings,
@@ -21,7 +21,7 @@ from claude_sdlc.orchestrator import (
     generate_escalation_doc,
     _scoped_clean,
 )
-from claude_sdlc.run_log import RunLog, StepLog, StepStatus
+from bmad_sdlc.run_log import RunLog, StepLog, StepStatus
 
 
 def _default_config() -> Config:
@@ -288,14 +288,14 @@ class TestGenerateEscalationDoc:
 
 
 class TestScopedClean:
-    @patch("claude_sdlc.orchestrator._sp")
+    @patch("bmad_sdlc.orchestrator._sp")
     def test_no_changes_skips_stash(self, mock_sp, capsys, tmp_path):
         mock_sp.run.return_value = MagicMock(stdout="", returncode=0)
         _scoped_clean("1-1", "2026-03-25T10:00:00", tmp_path)
         captured = capsys.readouterr()
         assert "skipping stash" in captured.out.lower()
 
-    @patch("claude_sdlc.orchestrator._sp")
+    @patch("bmad_sdlc.orchestrator._sp")
     def test_stash_called(self, mock_sp, tmp_path):
         status_result = MagicMock(stdout="M file.py\n", returncode=0)
         stash_result = MagicMock(stdout="", returncode=0)

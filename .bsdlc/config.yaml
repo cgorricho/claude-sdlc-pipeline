@@ -1,17 +1,17 @@
 project:
-  root: .
-  name: "{{ project_name }}"
+  root: ..
+  name: bmad-sdlc
 
 paths:
   sprint_status: _bmad-output/implementation-artifacts/sprint-status.yaml
   impl_artifacts: _bmad-output/implementation-artifacts
   planning_artifacts: _bmad-output/planning-artifacts
   test_artifacts: _bmad-output/test-artifacts
-  runs: .csdlc/runs
+  runs: .bsdlc/runs
 
 models:
-  dev: {{ dev_model }}
-  review: {{ review_model }}
+  dev: opus
+  review: sonnet
 
 claude:
   bin: claude
@@ -23,12 +23,12 @@ codex:
   timeout: 600
 
 build:
-  command: "{{ build_command }}"
+  command: "echo 'no build step'"
   timeout: 300
 
 test:
-  command: "{{ test_command }}"
-  reporter_args: {{ test_reporter_args }}
+  command: pytest
+  reporter_args: ["--tb=short", "--junitxml={runs_dir}/test-results.xml"]
   timeout: 300
 
 timeouts:

@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude_sdlc.run_log import (
+from bmad_sdlc.run_log import (
     RunLog, StepLog, StepStatus,
     HumanInterventions, InterventionDetail,
     _normalize_timestamp, _is_valid_iso,

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-log = logging.getLogger("claude_sdlc.contracts")
+log = logging.getLogger("bmad_sdlc.contracts")
 
 
 @dataclass
@@ -67,7 +67,7 @@ def validate_create_story(story_key: str, impl_dir: Path,
       - Story file has ≥1 acceptance criteria
       - sprint-status.yaml shows ready-for-dev for this story
     """
-    from claude_sdlc.state import read_sprint_status, get_story_status
+    from bmad_sdlc.state import read_sprint_status, get_story_status
 
     story_file = find_story_file(story_key, impl_dir)
     if not story_file:
@@ -121,7 +121,7 @@ def check_dev_story_status_gap(story_key: str, sprint_status_path: Path) -> bool
     Returns True if there's a gap (status is NOT 'review').
     Used to decide between 'completed' and 'completed-with-gaps' status.
     """
-    from claude_sdlc.state import read_sprint_status, get_story_status
+    from bmad_sdlc.state import read_sprint_status, get_story_status
 
     status = read_sprint_status(sprint_status_path)
     current = get_story_status(status, story_key)

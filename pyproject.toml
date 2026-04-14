@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-sdlc-pipeline"
+name = "bmad-sdlc"
 version = "0.1.0"
 description = "Automate your Claude Code SDLC — from story creation through code review and traceability, with contract validation and audit trails."
 requires-python = ">=3.11"
@@ -15,16 +15,16 @@ drizzle = []
 dev = ["pytest>=8.0", "pytest-cov", "ruff"]
 
 [project.scripts]
-csdlc = "claude_sdlc.cli:main"
+bsdlc = "bmad_sdlc.cli:main"
 
-[project.entry-points."claude_sdlc.plugins"]
-drizzle_drift_check = "claude_sdlc.plugins.drizzle_drift:DrizzleDriftCheck"
+[project.entry-points."bmad_sdlc.plugins"]
+drizzle_drift_check = "bmad_sdlc.plugins.drizzle_drift:DrizzleDriftCheck"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"claude_sdlc.templates" = ["*.j2"]
+"bmad_sdlc.templates" = ["*.j2"]
 
 [tool.ruff]
 target-version = "py311"

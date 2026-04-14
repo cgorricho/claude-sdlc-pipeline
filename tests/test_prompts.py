@@ -7,8 +7,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude_sdlc.config import Config
-from claude_sdlc.prompts import (
+from bmad_sdlc.config import Config
+from bmad_sdlc.prompts import (
     atdd_prompt,
     measure_prompt,
     build_prompt_with_budget,
@@ -84,7 +84,7 @@ class TestExtractReferencedSections:
         story = f"See {doc.name} lines 5-7"
         config = Config(paths=Config.__dataclass_fields__["paths"].default_factory())
         # Override paths to use tmp_path
-        from claude_sdlc.config import PathsConfig
+        from bmad_sdlc.config import PathsConfig
         config = Config(paths=PathsConfig(planning_artifacts=str(tmp_path)))
         result = extract_referenced_sections(story, config)
         assert len(result) == 1
@@ -97,7 +97,7 @@ class TestExtractReferencedSections:
 
     def test_missing_file_skipped(self, tmp_path):
         story = "See nonexistent.md lines 1-5"
-        from claude_sdlc.config import PathsConfig
+        from bmad_sdlc.config import PathsConfig
         config = Config(paths=PathsConfig(planning_artifacts=str(tmp_path)))
         result = extract_referenced_sections(story, config)
         assert result == {}

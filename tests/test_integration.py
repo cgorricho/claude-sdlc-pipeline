@@ -14,11 +14,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude_sdlc.config import Config
-from claude_sdlc.run_log import RunLog, StepLog, StepStatus
-from claude_sdlc.runner import RunResult
-from claude_sdlc.contracts import validate_code_review, ContractResult
-from claude_sdlc.orchestrator import (
+from bmad_sdlc.config import Config
+from bmad_sdlc.run_log import RunLog, StepLog, StepStatus
+from bmad_sdlc.runner import RunResult
+from bmad_sdlc.contracts import validate_code_review, ContractResult
+from bmad_sdlc.orchestrator import (
     determine_resume_step,
     should_run_step,
     parse_review_findings,
@@ -201,7 +201,7 @@ class TestModeBCodexParsedFindings:
         assert fix_count == 0 and design_count == 0 and note_count == 0
 
         # Mode B line 537 guard: after _strip_stderr, content is short
-        from claude_sdlc.orchestrator import _strip_stderr
+        from bmad_sdlc.orchestrator import _strip_stderr
         raw_content = _strip_stderr(findings_file.read_text()).strip()
         assert len(raw_content) <= 100, f"Stripped content too long ({len(raw_content)} bytes): {raw_content!r}"
 

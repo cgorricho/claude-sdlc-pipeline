@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude_sdlc.run_log import RunLog, StepLog, StepStatus
+from bmad_sdlc.run_log import RunLog, StepLog, StepStatus
 
 
 class TestResumeFromCorruptedRunLog:

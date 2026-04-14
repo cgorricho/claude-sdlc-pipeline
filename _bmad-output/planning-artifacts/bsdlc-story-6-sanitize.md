@@ -35,7 +35,7 @@ Refactor each file to replace hardcoded values with `config.*` access. This is *
 
 ## File-by-File Refactoring Details
 
-### File 1: `src/claude_sdlc/prompts.py` (372 lines)
+### File 1: `src/bmad_sdlc/prompts.py` (372 lines)
 
 **Hardcoded BMAD skill commands to replace:**
 - Line 127: `/bmad-bmm-create-story` → `config.workflows['create-story']`
@@ -53,7 +53,7 @@ Refactor each file to replace hardcoded values with `config.*` access. This is *
 
 **Approach:** Each prompt-building function should accept a `Config` parameter (or call `get_config()`). Prompt strings use f-string interpolation with config values.
 
-### File 2: `src/claude_sdlc/runner.py` (380 lines)
+### File 2: `src/bmad_sdlc/runner.py` (380 lines)
 
 **Hardcoded build command (line 216):**
 - `cmd=["npm", "run", "build"]` → `cmd=shlex.split(config.build.command)`
@@ -70,7 +70,7 @@ Refactor each file to replace hardcoded values with `config.*` access. This is *
 
 **Approach:** Import `shlex` for command splitting. Each function receives Config or calls `get_config()`.
 
-### File 3: `src/claude_sdlc/state.py` (104 lines)
+### File 3: `src/bmad_sdlc/state.py` (104 lines)
 
 **Hardcoded constant imports (line 12):**
 - `STORY_TYPES` → `config.story.types`
@@ -79,10 +79,10 @@ Refactor each file to replace hardcoded values with `config.*` access. This is *
 
 **Approach:** Functions in state.py that use these values should accept Config parameter or call `get_config()`.
 
-### File 4: `src/claude_sdlc/contracts.py` (219 lines)
+### File 4: `src/bmad_sdlc/contracts.py` (219 lines)
 
 **Status:** Already confirmed generic — no project-specific references. Only needs:
-- Verify import paths use `claude_sdlc.` prefix (done in Story 1)
+- Verify import paths use `bmad_sdlc.` prefix (done in Story 1)
 - Confirm no hardcoded paths crept in
 - No logic changes expected
 
@@ -90,27 +90,27 @@ Refactor each file to replace hardcoded values with `config.*` access. This is *
 
 ## Implementation Tasks
 
-1. Refactor `src/claude_sdlc/prompts.py`:
+1. Refactor `src/bmad_sdlc/prompts.py`:
    - Add `config: Config` parameter to each prompt-building function (or use `get_config()`)
    - Replace 4 hardcoded skill names with `config.workflows[*]`
    - Replace 2 hardcoded artifact paths with `config.paths.impl_artifacts`
    - Replace hardcoded `npx vitest run` / `npm run build` in prompt text with config values
    - Add `import shlex` if needed for command formatting in prompts
 
-2. Refactor `src/claude_sdlc/runner.py`:
+2. Refactor `src/bmad_sdlc/runner.py`:
    - Replace `["npm", "run", "build"]` with `shlex.split(config.build.command)`
    - Replace `["npx", "vitest", "run", ...]` with `shlex.split(config.test.command) + config.test.reporter_args`
    - Ensure `CLAUDE_BIN` and `CODEX_BIN` read from config
    - Ensure timeouts read from config
 
-3. Refactor `src/claude_sdlc/state.py`:
+3. Refactor `src/bmad_sdlc/state.py`:
    - Replace `STORY_TYPES` import with `config.story.types`
    - Replace `DEFAULT_STORY_TYPE` import with `config.story.default_type`
    - Replace `INFERENCE_KEYWORD_MAP` import with config-based merged keyword map
 
-4. Verify `src/claude_sdlc/contracts.py`:
+4. Verify `src/bmad_sdlc/contracts.py`:
    - `grep` for any hardcoded paths or project names — expect zero matches
-   - Verify imports use `claude_sdlc.` prefix
+   - Verify imports use `bmad_sdlc.` prefix
 
 5. Update test files:
    - `tests/test_prompts.py` — mock config, verify skill names and paths come from config
@@ -119,7 +119,7 @@ Refactor each file to replace hardcoded values with `config.*` access. This is *
 
 6. Remove temporary constant re-exports from `config.py` (added in Story 2 as bridge) — all consumers now use `get_config()` directly
 
-7. Final grep verification: `grep -rn "npm\|vitest\|bmad-bmm\|bmad-tea\|_bmad-output" src/claude_sdlc/` should return zero matches in non-config, non-plugin files (config.py may have defaults, plugin has Drizzle commands — that's expected)
+7. Final grep verification: `grep -rn "npm\|vitest\|bmad-bmm\|bmad-tea\|_bmad-output" src/bmad_sdlc/` should return zero matches in non-config, non-plugin files (config.py may have defaults, plugin has Drizzle commands — that's expected)
 
 ---
 
@@ -139,12 +139,12 @@ Refactor each file to replace hardcoded values with `config.*` access. This is *
 
 **AC-7**: Temporary constant re-exports removed from `config.py` — only `get_config()` and `Config` class exported
 
-**AC-8**: `grep -rn "npm\|vitest\|bmad-bmm\|bmad-tea\|_bmad-output" src/claude_sdlc/` returns matches only in config defaults and drizzle plugin — zero matches in prompts.py, runner.py, state.py, contracts.py, orchestrator.py
+**AC-8**: `grep -rn "npm\|vitest\|bmad-bmm\|bmad-tea\|_bmad-output" src/bmad_sdlc/` returns matches only in config defaults and drizzle plugin — zero matches in prompts.py, runner.py, state.py, contracts.py, orchestrator.py
 
 ---
 
 ## References
 
-- Master tech spec: `_bmad-output/planning-artifacts/claude-sdlc-pipeline-tech-spec.md` (Section 8)
-- Files to refactor: `src/claude_sdlc/prompts.py`, `src/claude_sdlc/runner.py`, `src/claude_sdlc/state.py`, `src/claude_sdlc/contracts.py`
-- Config system: `src/claude_sdlc/config.py` (from Story 2)
+- Master tech spec: `_bmad-output/planning-artifacts/bmad-sdlc-tech-spec.md` (Section 8)
+- Files to refactor: `src/bmad_sdlc/prompts.py`, `src/bmad_sdlc/runner.py`, `src/bmad_sdlc/state.py`, `src/bmad_sdlc/contracts.py`
+- Config system: `src/bmad_sdlc/config.py` (from Story 2)

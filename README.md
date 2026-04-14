@@ -1,8 +1,8 @@
-# claude-sdlc-pipeline
+# bmad-sdlc
 
 Automate the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) story development cycle with Claude Code — from story creation through code review and traceability, with contract validation and audit trails.
 
-`claude-sdlc-pipeline` orchestrates Claude Code sessions through the BMAD Method's per-story development lifecycle. The BMAD Method structures AI-assisted software development into disciplined workflows — this pipeline automates the execution of those workflows so you don't have to invoke each one manually.
+`bmad-sdlc` orchestrates Claude Code sessions through the BMAD Method's per-story development lifecycle. The BMAD Method structures AI-assisted software development into disciplined workflows — this pipeline automates the execution of those workflows so you don't have to invoke each one manually.
 
 The default pipeline runs 4 BMAD workflow steps per story: **create-story** (`/bmad-bmm-create-story`), **dev-story** (`/bmad-bmm-dev-story`), **code-review** (`/bmad-bmm-code-review`), and **trace** (`/bmad-tea-testarch-trace`). It validates contracts at every step, selects the right review mode automatically, and produces traceability reports.
 
@@ -13,15 +13,15 @@ The default pipeline runs 4 BMAD workflow steps per story: **create-story** (`/b
 ### From source (development)
 
 ```bash
-git clone https://github.com/your-org/claude-sdlc-pipeline.git
-cd claude-sdlc-pipeline
+git clone https://github.com/your-org/bmad-sdlc.git
+cd bmad-sdlc
 pip install -e ".[dev]"
 ```
 
 ### From PyPI (when published)
 
 ```bash
-pip install claude-sdlc-pipeline
+pip install bmad-sdlc
 ```
 
 **Requirements:** Python 3.11+, [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) on PATH, [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) installed in your target project.
@@ -30,23 +30,23 @@ pip install claude-sdlc-pipeline
 
 ```bash
 # 1. Initialize config (auto-detects project type)
-csdlc init
+bsdlc init
 
 # 2. Verify environment
-csdlc validate
+bsdlc validate
 
 # 3. Run the full pipeline for a story
-csdlc run --story 1-3
+bsdlc run --story 1-3
 ```
 
 ## CLI Reference
 
-### `csdlc run`
+### `bsdlc run`
 
 Execute the full pipeline for a story.
 
 ```
-csdlc run --story <key> [OPTIONS]
+bsdlc run --story <key> [OPTIONS]
 ```
 
 | Option | Type | Default | Description |
@@ -61,38 +61,38 @@ csdlc run --story <key> [OPTIONS]
 | `--clean` | flag | `false` | `git stash` uncommitted changes before starting |
 | `-v`, `--verbose` | flag | `false` | Stream full Claude output to terminal |
 
-### `csdlc init`
+### `bsdlc init`
 
-Generate `.csdlc/config.yaml` for the current project.
+Generate `.bsdlc/config.yaml` for the current project.
 
 ```
-csdlc init [--non-interactive]
+bsdlc init [--non-interactive]
 ```
 
 In interactive mode (default), the command:
 1. Detects project type from manifest files (`package.json` = Node.js, `pyproject.toml` = Python, `go.mod` = Go)
 2. Prompts for project name, build/test commands, and model choices with sensible defaults
-3. Writes `.csdlc/config.yaml`, creates `.csdlc/runs/`, and appends `.csdlc/runs/` to `.gitignore`
+3. Writes `.bsdlc/config.yaml`, creates `.bsdlc/runs/`, and appends `.bsdlc/runs/` to `.gitignore`
 
 With `--non-interactive`, uses all detected defaults without prompting.
 
-### `csdlc validate`
+### `bsdlc validate`
 
 Check config and environment readiness.
 
 ```
-csdlc validate
+bsdlc validate
 ```
 
 Checks:
-- `.csdlc/config.yaml` parses and validates
+- `.bsdlc/config.yaml` parses and validates
 - Claude binary is on PATH
 - Build command executable is on PATH
 - All configured plugins resolve and load
 
 Exits `0` if all pass, `1` if any fail.
 
-### `csdlc --version`
+### `bsdlc --version`
 
 Print the installed version.
 
@@ -164,13 +164,13 @@ Tags are inferred from story content using the inference keyword map. Built-in k
 
 ## Configuration Reference
 
-Configuration lives in `.csdlc/config.yaml`. Generate a starter config with `csdlc init`.
+Configuration lives in `.bsdlc/config.yaml`. Generate a starter config with `bsdlc init`.
 
 ### `project`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `root` | string | `"."` | Project root relative to `.csdlc/` directory (resolved to absolute) |
+| `root` | string | `"."` | Project root relative to `.bsdlc/` directory (resolved to absolute) |
 | `name` | string | `""` | **Required.** Project name |
 | `source_dirs` | list[string] | `[]` | Source directories for code analysis |
 | `exclude_patterns` | list[string] | `["node_modules", "dist", ".next", ".turbo"]` | Glob patterns to exclude from source scanning |
@@ -185,7 +185,7 @@ All paths support `{project_root}` placeholder interpolation and are resolved to
 | `impl_artifacts` | string | `"_bmad-output/implementation-artifacts"` | Implementation artifact output directory |
 | `planning_artifacts` | string | `"_bmad-output/planning-artifacts"` | Planning artifact directory |
 | `test_artifacts` | string | `"_bmad-output/test-artifacts"` | Test artifact output directory |
-| `runs` | string | `".csdlc/runs"` | Pipeline run logs directory |
+| `runs` | string | `".bsdlc/runs"` | Pipeline run logs directory |
 
 ### `models`
 
@@ -287,7 +287,7 @@ Plugins run between the dev-story verification step and code-review. They implem
 ```python
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
-from claude_sdlc.config import Config
+from bmad_sdlc.config import Config
 
 @dataclass
 class CheckResult:
@@ -311,7 +311,7 @@ The bundled `DrizzleDriftCheck` plugin detects Drizzle ORM schema drift. Here's 
 
 ```python
 import subprocess
-from claude_sdlc.plugins import CheckResult
+from bmad_sdlc.plugins import CheckResult
 
 class DrizzleDriftCheck:
     name: str = "drizzle_drift_check"
@@ -347,18 +347,18 @@ class DrizzleDriftCheck:
 Add an entry point in your package's `pyproject.toml`:
 
 ```toml
-[project.entry-points."claude_sdlc.plugins"]
+[project.entry-points."bmad_sdlc.plugins"]
 my_check = "my_package.my_module:MyCheckClass"
 ```
 
-Then enable it in `.csdlc/config.yaml`:
+Then enable it in `.bsdlc/config.yaml`:
 
 ```yaml
 plugins:
   - my_check
 ```
 
-The pipeline loads plugins by matching names from `config.plugins` against the `claude_sdlc.plugins` entry point group using `importlib.metadata.entry_points()`. Unresolvable or non-conforming plugins log a warning and are skipped.
+The pipeline loads plugins by matching names from `config.plugins` against the `bmad_sdlc.plugins` entry point group using `importlib.metadata.entry_points()`. Unresolvable or non-conforming plugins log a warning and are skipped.
 
 ## About the BMAD Method
 
@@ -379,26 +379,26 @@ For projects currently using the embedded `automation/` directory (e.g. the orig
 
 1. **Install the standalone package:**
    ```bash
-   pip install claude-sdlc-pipeline
+   pip install bmad-sdlc
    ```
 
 2. **Initialize configuration:**
    ```bash
    cd /path/to/your-project
-   csdlc init
+   bsdlc init
    ```
    The init command auto-detects your project type (Node.js, Python, Go) and pre-fills sensible defaults for build/test commands.
 
-3. **Edit `.csdlc/config.yaml`** if needed:
+3. **Edit `.bsdlc/config.yaml`** if needed:
    - Add `drizzle_drift_check` to `plugins:` if you use Drizzle ORM
    - Adjust model choices, timeouts, or paths as needed
 
 4. **Verify with a dry run:**
    ```bash
-   csdlc run --story <key> --dry-run
+   bsdlc run --story <key> --dry-run
    ```
 
-5. **Update references:** Replace any scripts or documentation that reference `python automation/auto_story.py` with `csdlc run`.
+5. **Update references:** Replace any scripts or documentation that reference `python automation/auto_story.py` with `bsdlc run`.
 
 6. **Remove the embedded pipeline:**
    ```bash
@@ -409,8 +409,8 @@ For projects currently using the embedded `automation/` directory (e.g. the orig
 
 - Pipeline behavior is identical — same 4-step BMAD workflow cycle, same contract validation, same review mode logic
 - Drizzle drift check is now opt-in via the `plugins:` config key (previously hardcoded)
-- Configuration moves from hardcoded constants to `.csdlc/config.yaml`
-- All commands go through the `csdlc` CLI instead of direct Python script invocation
+- Configuration moves from hardcoded constants to `.bsdlc/config.yaml`
+- All commands go through the `bsdlc` CLI instead of direct Python script invocation
 
 ## License
 

@@ -8,13 +8,13 @@ transitions, verify-after-fix loop, scoped clean, and observability.
 Pipeline: create-story → atdd → dev-story → verify → code-review → trace
 
 Usage:
-    csdlc run --story 1-3
-    csdlc run --story 1-3 --skip-create
-    csdlc run --story 1-3 --skip-trace
-    csdlc run --story 1-3 --resume
-    csdlc run --story 1-3 --resume-from code-review
-    csdlc run --story 1-3 --review-mode B
-    csdlc run --story 1-3 --dry-run
+    bsdlc run --story 1-3
+    bsdlc run --story 1-3 --skip-create
+    bsdlc run --story 1-3 --skip-trace
+    bsdlc run --story 1-3 --resume
+    bsdlc run --story 1-3 --resume-from code-review
+    bsdlc run --story 1-3 --review-mode B
+    bsdlc run --story 1-3 --dry-run
 
 Exit codes:
     0 — Story completed successfully
@@ -32,8 +32,8 @@ from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
 
-from claude_sdlc.config import Config, get_config
-from claude_sdlc.contracts import (
+from bmad_sdlc.config import Config, get_config
+from bmad_sdlc.contracts import (
     check_dev_story_status_gap,
     find_story_file,
     validate_atdd,
@@ -41,8 +41,8 @@ from claude_sdlc.contracts import (
     validate_dev_story,
     validate_trace,
 )
-from claude_sdlc.plugins import load_plugins
-from claude_sdlc.prompts import (
+from bmad_sdlc.plugins import load_plugins
+from bmad_sdlc.prompts import (
     atdd_prompt,
     code_review_prompt,
     codex_review_prompt,
@@ -54,9 +54,9 @@ from claude_sdlc.prompts import (
     mode_b_resume_instructions,
     trace_prompt,
 )
-from claude_sdlc.run_log import RunLog, StepLog, StepStatus
-from claude_sdlc.runner import parse_test_results, run_build_verify, run_codex_review, run_workflow, select_review_mode
-from claude_sdlc.state import (
+from bmad_sdlc.run_log import RunLog, StepLog, StepStatus
+from bmad_sdlc.runner import parse_test_results, run_build_verify, run_codex_review, run_workflow, select_review_mode
+from bmad_sdlc.state import (
     get_story_status,
     read_sprint_status,
     read_story_tags,
@@ -136,7 +136,7 @@ def run_pipeline(
             except Exception as e:
                 print(f"ERROR: Failed to load run_log.yaml: {e}", file=sys.stderr)
                 print(f"  Run directory: {run_dir}", file=sys.stderr)
-                print(f"  Consider starting fresh: csdlc run "
+                print(f"  Consider starting fresh: bsdlc run "
                       f"--story {story_key} --resume-from {resume_from or 'create-story'}",
                       file=sys.stderr)
                 sys.exit(1)
@@ -184,7 +184,7 @@ def run_pipeline(
 
     # ── Set up logging ────────────────────────────────────────────
     setup_logging(run_dir, verbose=verbose, dry_run=dry_run)
-    log = logging.getLogger("claude_sdlc.orchestrator")
+    log = logging.getLogger("bmad_sdlc.orchestrator")
 
     if dry_run:
         print("\n=== DRY RUN ===")
@@ -569,7 +569,7 @@ def run_pipeline(
                         log.info(f"AUTOMATION PAUSED — {reason}")
                         log.info(f"{'='*60}")
                         log.info(f"  Escalation doc: {escalation_path}")
-                        log.info(f"  Resume: csdlc run --story {story_key} --resume")
+                        log.info(f"  Resume: bsdlc run --story {story_key} --resume")
                         sys.exit(3)
 
                     # Finding 2 fix: NOTE-only or unparseable output → pause for manual review
@@ -670,7 +670,7 @@ def run_pipeline(
                 log.info(f"{'='*60}")
                 log.info(f"  Cursor prompt:       {cursor_prompt_path}")
                 log.info(f"  Resume instructions: {resume_path}")
-                log.info(f"  Resume command:      csdlc run "
+                log.info(f"  Resume command:      bsdlc run "
                          f"--story {story_key} --resume")
                 sys.exit(3)
 
@@ -779,7 +779,7 @@ def run_pipeline(
                 log.info(f"AUTOMATION PAUSED — {design_count} [DESIGN] decision(s) required")
                 log.info(f"{'='*60}")
                 log.info(f"  Escalation doc: {escalation_path}")
-                log.info(f"  Resume: csdlc run "
+                log.info(f"  Resume: bsdlc run "
                          f"--story {story_key} --resume")
                 sys.exit(3)
 
@@ -946,9 +946,9 @@ def run_pipeline(
 
 
 def main(story_key=None, **kwargs):
-    """Legacy entry -- delegates to run_pipeline(). Use 'csdlc run' instead."""
+    """Legacy entry -- delegates to run_pipeline(). Use 'bsdlc run' instead."""
     if story_key is None:
-        raise TypeError("main() requires story_key as first argument. Use 'csdlc run' instead.")
+        raise TypeError("main() requires story_key as first argument. Use 'bsdlc run' instead.")
     run_pipeline(story_key, **kwargs)
 
 
@@ -968,7 +968,7 @@ def _scoped_clean(story_key: str, timestamp: str, project_root: Path):
         print("  No uncommitted changes — skipping stash")
         return
 
-    stash_msg = f"csdlc clean: {story_key} {timestamp}"
+    stash_msg = f"bsdlc clean: {story_key} {timestamp}"
     print(f"Stashing uncommitted changes: {stash_msg}")
     result = _sp.run(
         ["git", "stash", "push", "-m", stash_msg],
@@ -986,7 +986,7 @@ def setup_logging(run_dir: Path, verbose: bool = False, dry_run: bool = False):
     File log: {run_dir}/pipeline.log — timestamps, all levels, full detail.
     Terminal: INFO+ only, no timestamps, concise format.
     """
-    log = logging.getLogger("claude_sdlc.orchestrator")
+    log = logging.getLogger("bmad_sdlc.orchestrator")
     log.setLevel(logging.DEBUG)
     log.handlers.clear()
 
@@ -1261,7 +1261,7 @@ def generate_escalation_doc(path: Path, story_key: str, findings: dict,
         "findings": [],
         "test_results_at_pause": str(run_dir / "test-results.json"),
         "action_required": "Run Party Mode or make decisions manually",
-        "resume_command": f"csdlc run --story {story_key} --resume",
+        "resume_command": f"bsdlc run --story {story_key} --resume",
     }
 
     for i, finding in enumerate(findings["design"], 1):

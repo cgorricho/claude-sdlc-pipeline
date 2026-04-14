@@ -11,29 +11,29 @@
 
 ### Problem Statement
 
-The current `src/claude_sdlc/config.py` (copied from who_else_is_here) is a flat module with ~30 module-level constants. Every value — paths, binaries, models, timeouts, workflow commands, keyword maps — is hardcoded. This makes the pipeline project-specific and non-reusable.
+The current `src/bmad_sdlc/config.py` (copied from who_else_is_here) is a flat module with ~30 module-level constants. Every value — paths, binaries, models, timeouts, workflow commands, keyword maps — is hardcoded. This makes the pipeline project-specific and non-reusable.
 
 ### Solution
 
-Replace the flat constants module with a `Config` frozen dataclass loaded from `.csdlc/config.yaml`. All downstream code will access configuration through `get_config()` returning an immutable `Config` instance. The YAML schema, variable interpolation, and validation are all defined in the tech spec Section 5.
+Replace the flat constants module with a `Config` frozen dataclass loaded from `.bsdlc/config.yaml`. All downstream code will access configuration through `get_config()` returning an immutable `Config` instance. The YAML schema, variable interpolation, and validation are all defined in the tech spec Section 5.
 
 This is a **rewrite of one file** (`config.py`) plus **updating imports** in all files that use it.
 
 ### Scope
 
 **In Scope:**
-- Rewrite `src/claude_sdlc/config.py` — replace module-level constants with Config dataclass + YAML loader
+- Rewrite `src/bmad_sdlc/config.py` — replace module-level constants with Config dataclass + YAML loader
 - YAML schema matching tech spec Section 5
 - Variable interpolation for `{project_root}` and `{runs_dir}` in path values
 - `get_config()` function as the single entry point
 - Validation with clear error messages for missing/invalid keys
 - Safety invariant: `INFERENCE_KEYWORD_MAP` built-in defaults cannot be removed by user config
 - Update `tests/test_config.py` (new) to cover the new system
-- Update imports in all files that currently do `from claude_sdlc.config import CONSTANT`
+- Update imports in all files that currently do `from bmad_sdlc.config import CONSTANT`
 
 **Out of Scope:**
-- `csdlc init` command to generate config (Story 3)
-- `csdlc validate` command (Story 3)
+- `bsdlc init` command to generate config (Story 3)
+- `bsdlc validate` command (Story 3)
 - Changing orchestrator logic (Story 4)
 - Changing prompt templates (Story 6)
 
@@ -41,7 +41,7 @@ This is a **rewrite of one file** (`config.py`) plus **updating imports** in all
 
 ## Current State: What Needs to Change
 
-### File: `src/claude_sdlc/config.py` (111 lines) — FULL REWRITE
+### File: `src/bmad_sdlc/config.py` (111 lines) — FULL REWRITE
 
 Every module-level constant below must be absorbed into the Config dataclass:
 
@@ -88,7 +88,7 @@ Every module-level constant below must be absorbed into the Config dataclass:
 
 ### Files that import from config.py — IMPORT UPDATES NEEDED
 
-Every file that currently does `from claude_sdlc.config import SOME_CONSTANT` must be updated to `from claude_sdlc.config import get_config` and access values via `config = get_config()`.
+Every file that currently does `from bmad_sdlc.config import SOME_CONSTANT` must be updated to `from bmad_sdlc.config import get_config` and access values via `config = get_config()`.
 
 These files will be updated in Stories 4 and 6 for their logic changes, but the **import paths** must work after this story. Approach: the new config.py should temporarily re-export the old constant names as aliases from the Config defaults, so nothing breaks until Stories 4/6 refactor the consumers.
 
@@ -96,7 +96,7 @@ These files will be updated in Stories 4 and 6 for their logic changes, but the 
 
 ## Implementation Tasks
 
-1. Rewrite `src/claude_sdlc/config.py`:
+1. Rewrite `src/bmad_sdlc/config.py`:
    - Define nested dataclasses: `PathsConfig`, `ClaudeConfig`, `CodexConfig`, `BuildConfig`, `TestConfig`, `ReviewConfig`, `SafetyConfig`, `StoryConfig`, `Config`
    - Implement `load_config(path: Path) -> Config` that reads YAML, validates, resolves `{project_root}` and `{runs_dir}` interpolation
    - Implement `get_config() -> Config` singleton accessor
@@ -115,7 +115,7 @@ These files will be updated in Stories 4 and 6 for their logic changes, but the 
    - `extra_inference_keywords` cannot override/remove builtins
    - `get_config()` returns same instance (singleton)
 
-3. Create a sample `.csdlc/config.yaml` in the project root matching the schema in tech spec Section 5, pre-filled for the claude-sdlc-pipeline project itself (it will eventually test itself)
+3. Create a sample `.bsdlc/config.yaml` in the project root matching the schema in tech spec Section 5, pre-filled for the bmad-sdlc project itself (it will eventually test itself)
 
 4. Add `pyyaml>=6.0` to dependencies in `pyproject.toml` if not already present
 
@@ -123,7 +123,7 @@ These files will be updated in Stories 4 and 6 for their logic changes, but the 
 
 ## Acceptance Criteria
 
-**AC-1**: `Config` dataclass loads from `.csdlc/config.yaml` with full validation — missing required keys produce clear error messages naming the missing key
+**AC-1**: `Config` dataclass loads from `.bsdlc/config.yaml` with full validation — missing required keys produce clear error messages naming the missing key
 
 **AC-2**: All values currently hardcoded in `config.py` are represented in the YAML schema — zero module-level constants remain (except temporary re-export aliases)
 
@@ -139,5 +139,5 @@ These files will be updated in Stories 4 and 6 for their logic changes, but the 
 
 ## References
 
-- Master tech spec: `_bmad-output/planning-artifacts/claude-sdlc-pipeline-tech-spec.md` (Sections 5, 6)
-- Current config.py: `src/claude_sdlc/config.py` (will be fully rewritten)
+- Master tech spec: `_bmad-output/planning-artifacts/bmad-sdlc-tech-spec.md` (Sections 5, 6)
+- Current config.py: `src/bmad_sdlc/config.py` (will be fully rewritten)

@@ -12,7 +12,7 @@ import pytest
 # Add automation dir to path so we can import modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude_sdlc.contracts import (
+from bmad_sdlc.contracts import (
     count_acceptance_criteria,
     validate_atdd,
     validate_create_story,

@@ -8,7 +8,7 @@ skill commands directly with parameters. They do NOT set agent personas.
 import re
 from pathlib import Path
 
-from claude_sdlc.config import Config
+from bmad_sdlc.config import Config
 
 
 # ── Compact trace template (Section 12) ─────────────────────────────
@@ -358,12 +358,12 @@ def mode_b_resume_instructions(story_key: str, run_dir: str, config: Config) -> 
 
 3. Resume the automation pipeline:
    ```bash
-   csdlc run --story {story_key} --resume
+   bsdlc run --story {story_key} --resume
    ```
 
 4. Or resume from a specific step:
    ```bash
-   csdlc run --story {story_key} --resume-from code-review
+   bsdlc run --story {story_key} --resume-from code-review
    ```
 
 ## Run directory

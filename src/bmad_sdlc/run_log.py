@@ -182,7 +182,7 @@ class RunLog:
         errors = self.validate_schema()
         if errors:
             import logging
-            log = logging.getLogger("claude_sdlc.run_log")
+            log = logging.getLogger("bmad_sdlc.run_log")
             log.warning(f"Run log schema warnings: {errors}")
 
         # Update computed metrics

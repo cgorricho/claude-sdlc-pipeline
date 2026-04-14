@@ -34,10 +34,10 @@ Write a comprehensive README.md plus a migration guide for existing embedded-pip
 
 1. Create `README.md` with these sections:
    - **What is this**: Value proposition from tech spec Section 1 — "Automate your Claude Code SDLC — from story creation through code review and traceability, with contract validation and audit trails."
-   - **Install**: `pip install claude-sdlc-pipeline` (from PyPI, eventually) and `pip install -e .` (dev)
-   - **Quickstart**: `csdlc init` → `csdlc validate` → `csdlc run --story <key>`
-   - **CLI Reference**: `csdlc run` with all flags, `csdlc init` with `--non-interactive`, `csdlc validate`
-   - **Configuration Reference**: Document every key in `.csdlc/config.yaml` with type, default, and description. Source this directly from the Config dataclass and tech spec Section 5.
+   - **Install**: `pip install bmad-sdlc` (from PyPI, eventually) and `pip install -e .` (dev)
+   - **Quickstart**: `bsdlc init` → `bsdlc validate` → `bsdlc run --story <key>`
+   - **CLI Reference**: `bsdlc run` with all flags, `bsdlc init` with `--non-interactive`, `bsdlc validate`
+   - **Configuration Reference**: Document every key in `.bsdlc/config.yaml` with type, default, and description. Source this directly from the Config dataclass and tech spec Section 5.
    - **Pipeline Steps**: Describe the 4-step flow (create-story → dev-story → code-review → trace) and what each does
    - **Review Modes**: Explain Mode A vs Mode B, auto-selection, safety invariants
    - **Plugin Authoring Guide**: How to write a `PreReviewCheck` plugin, register it via entry_points, example using `DrizzleDriftCheck` as reference
@@ -51,19 +51,19 @@ Write a comprehensive README.md plus a migration guide for existing embedded-pip
 
 ## Acceptance Criteria
 
-**AC-1**: README covers: what the tool does, install instructions, `csdlc init` quickstart, `csdlc run` usage, full config reference
+**AC-1**: README covers: what the tool does, install instructions, `bsdlc init` quickstart, `bsdlc run` usage, full config reference
 
 **AC-2**: Config reference documents every YAML key with type, default value, and description — verified against actual Config dataclass
 
 **AC-3**: Plugin authoring guide includes working example based on `DrizzleDriftCheck`
 
-**AC-4**: Migration guide documents steps to go from embedded `automation/` to standalone `csdlc` — matches tech spec Section 11
+**AC-4**: Migration guide documents steps to go from embedded `automation/` to standalone `bsdlc` — matches tech spec Section 11
 
 ---
 
 ## References
 
-- Master tech spec: `_bmad-output/planning-artifacts/claude-sdlc-pipeline-tech-spec.md` (Sections 1, 5, 7, 11)
-- Config dataclass: `src/claude_sdlc/config.py`
-- Plugin protocol: `src/claude_sdlc/plugins.py`
-- CLI: `src/claude_sdlc/cli.py`
+- Master tech spec: `_bmad-output/planning-artifacts/bmad-sdlc-tech-spec.md` (Sections 1, 5, 7, 11)
+- Config dataclass: `src/bmad_sdlc/config.py`
+- Plugin protocol: `src/bmad_sdlc/plugins.py`
+- CLI: `src/bmad_sdlc/cli.py`

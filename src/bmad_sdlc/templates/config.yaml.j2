@@ -1,17 +1,17 @@
 project:
-  root: ..
-  name: claude-sdlc-pipeline
+  root: .
+  name: "{{ project_name }}"
 
 paths:
   sprint_status: _bmad-output/implementation-artifacts/sprint-status.yaml
   impl_artifacts: _bmad-output/implementation-artifacts
   planning_artifacts: _bmad-output/planning-artifacts
   test_artifacts: _bmad-output/test-artifacts
-  runs: .csdlc/runs
+  runs: .bsdlc/runs
 
 models:
-  dev: opus
-  review: sonnet
+  dev: {{ dev_model }}
+  review: {{ review_model }}
 
 claude:
   bin: claude
@@ -23,12 +23,12 @@ codex:
   timeout: 600
 
 build:
-  command: "echo 'no build step'"
+  command: "{{ build_command }}"
   timeout: 300
 
 test:
-  command: pytest
-  reporter_args: ["--tb=short", "--junitxml={runs_dir}/test-results.xml"]
+  command: "{{ test_command }}"
+  reporter_args: {{ test_reporter_args }}
   timeout: 300
 
 timeouts:

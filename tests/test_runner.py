@@ -9,8 +9,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude_sdlc.config import Config
-from claude_sdlc.runner import RunResult, run_with_timeout, select_review_mode, parse_test_results, run_codex_review, _git_tree_fingerprint
+from bmad_sdlc.config import Config
+from bmad_sdlc.runner import RunResult, run_with_timeout, select_review_mode, parse_test_results, run_codex_review, _git_tree_fingerprint
 
 
 @pytest.fixture
@@ -187,7 +187,7 @@ class TestParseTestResults:
 
 
 class TestRunCodexReview:
-    @patch("claude_sdlc.runner.run_with_timeout")
+    @patch("bmad_sdlc.runner.run_with_timeout")
     def test_successful_review(self, mock_rwt, tmp_run_dir, tmp_impl_dir, default_config):
         """Codex succeeds → findings written to impl dir."""
         output_log = tmp_run_dir / "codex-review-output.log"
@@ -202,7 +202,7 @@ class TestRunCodexReview:
         assert findings_file.exists()
         assert "[FIX]" in findings_file.read_text()
 
-    @patch("claude_sdlc.runner.run_with_timeout")
+    @patch("bmad_sdlc.runner.run_with_timeout")
     def test_codex_timeout(self, mock_rwt, tmp_run_dir, tmp_impl_dir, default_config):
         """Codex timeout → RunResult with timeout flag."""
         mock_rwt.return_value = RunResult(
@@ -214,7 +214,7 @@ class TestRunCodexReview:
         assert result.exit_code == 124
         assert result.timed_out
 
-    @patch("claude_sdlc.runner.run_with_timeout")
+    @patch("bmad_sdlc.runner.run_with_timeout")
     def test_uses_codex_timeout(self, mock_rwt, tmp_run_dir, tmp_impl_dir, default_config):
         """Verify config.codex.timeout is used, not code-review timeout."""
         mock_rwt.return_value = RunResult(
@@ -225,7 +225,7 @@ class TestRunCodexReview:
         call_kwargs = mock_rwt.call_args
         assert call_kwargs[1]["timeout"] == default_config.codex.timeout
 
-    @patch("claude_sdlc.runner.run_with_timeout")
+    @patch("bmad_sdlc.runner.run_with_timeout")
     def test_passes_cwd(self, mock_rwt, tmp_run_dir, tmp_impl_dir, tmp_path, default_config):
         """F5: Verify cwd is passed to run_with_timeout."""
         mock_rwt.return_value = RunResult(
@@ -240,8 +240,8 @@ class TestRunCodexReview:
 class TestCodexIntegrityCheck:
     """Finding 3: Codex review must not mutate the repository."""
 
-    @patch("claude_sdlc.runner._git_tree_fingerprint")
-    @patch("claude_sdlc.runner.run_with_timeout")
+    @patch("bmad_sdlc.runner._git_tree_fingerprint")
+    @patch("bmad_sdlc.runner.run_with_timeout")
     def test_repo_mutation_detected(self, mock_rwt, mock_fingerprint, tmp_run_dir, tmp_impl_dir, default_config):
         """Codex mutates repo → RunResult with exit_code=1."""
         mock_fingerprint.side_effect = ["before-state\n", "after-state-CHANGED\n"]
@@ -258,8 +258,8 @@ class TestCodexIntegrityCheck:
         assert "before-state" in audit_log.read_text()
         assert "after-state-CHANGED" in audit_log.read_text()
 
-    @patch("claude_sdlc.runner._git_tree_fingerprint")
-    @patch("claude_sdlc.runner.run_with_timeout")
+    @patch("bmad_sdlc.runner._git_tree_fingerprint")
+    @patch("bmad_sdlc.runner.run_with_timeout")
     def test_clean_review_passes(self, mock_rwt, mock_fingerprint, tmp_run_dir, tmp_impl_dir, default_config):
         """Codex review with no repo mutation → normal success."""
         mock_fingerprint.return_value = "same-state\n"
@@ -274,8 +274,8 @@ class TestCodexIntegrityCheck:
         findings = tmp_impl_dir / "2-1-code-review-findings.md"
         assert findings.exists()
 
-    @patch("claude_sdlc.runner._git_tree_fingerprint")
-    @patch("claude_sdlc.runner.run_with_timeout")
+    @patch("bmad_sdlc.runner._git_tree_fingerprint")
+    @patch("bmad_sdlc.runner.run_with_timeout")
     def test_fingerprint_failure_skips_check(self, mock_rwt, mock_fingerprint, tmp_run_dir, tmp_impl_dir, default_config):
         """If git fingerprint fails (empty string), skip integrity check gracefully."""
         mock_fingerprint.return_value = ""

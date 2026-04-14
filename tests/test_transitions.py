@@ -8,13 +8,13 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from claude_sdlc.config import Config
-from claude_sdlc.state import (
+from bmad_sdlc.config import Config
+from bmad_sdlc.state import (
     read_sprint_status, get_story_status, get_story_full_key,
     update_story_status, read_story_type, read_story_tags,
     infer_tags_from_content,
 )
-from claude_sdlc.runner import select_review_mode
+from bmad_sdlc.runner import select_review_mode
 
 
 @pytest.fixture

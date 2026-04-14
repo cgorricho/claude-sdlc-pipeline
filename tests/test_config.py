@@ -1,4 +1,4 @@
-"""Tests for claude_sdlc.config — YAML configuration system."""
+"""Tests for bmad_sdlc.config — YAML configuration system."""
 
 import warnings
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from claude_sdlc.config import (
+from bmad_sdlc.config import (
     _BUILTIN_INFERENCE_KEYWORDS,
     Config,
     _reset_config,
@@ -17,11 +17,11 @@ from claude_sdlc.config import (
 
 @pytest.fixture()
 def config_dir(tmp_path):
-    """Create a .csdlc directory with a minimal valid config."""
-    csdlc = tmp_path / ".csdlc"
-    csdlc.mkdir()
-    (tmp_path / ".csdlc" / "runs").mkdir()
-    return csdlc
+    """Create a .bsdlc directory with a minimal valid config."""
+    bsdlc = tmp_path / ".bsdlc"
+    bsdlc.mkdir()
+    (tmp_path / ".bsdlc" / "runs").mkdir()
+    return bsdlc
 
 
 def _write_config(config_dir: Path, data: dict) -> Path:
@@ -107,7 +107,7 @@ class TestValidConfig:
 
 class TestMissingFile:
     def test_missing_file_raises(self, tmp_path):
-        missing = tmp_path / ".csdlc" / "config.yaml"
+        missing = tmp_path / ".bsdlc" / "config.yaml"
         with pytest.raises(FileNotFoundError, match="Config file not found"):
             load_config(missing)
 
@@ -191,7 +191,7 @@ class TestProjectRootInterpolation:
         )
         path = _write_config(config_dir, data)
         config = load_config(path)
-        # project.root is ".." relative to .csdlc/, so project_root = tmp_path
+        # project.root is ".." relative to .bsdlc/, so project_root = tmp_path
         project_root = str(config_dir.parent.resolve())
         assert config.paths.sprint_status == str(Path(project_root) / "custom" / "status.yaml")
 

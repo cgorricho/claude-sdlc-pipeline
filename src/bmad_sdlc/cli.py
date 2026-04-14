@@ -1,4 +1,4 @@
-"""CLI entry point for csdlc."""
+"""CLI entry point for bsdlc."""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from pathlib import Path
 import click
 import yaml
 
-from claude_sdlc import __version__
+from bmad_sdlc import __version__
 
 # Core invariant — pipeline step names used for Click choices at import time.
 # Matches Config.story.pipeline_steps defaults (not user-configurable).
 _PIPELINE_STEPS = ["create-story", "atdd", "dev-story", "code-review", "trace"]
 
 # ---------------------------------------------------------------------------
-# Project type detection for `csdlc init`
+# Project type detection for `bsdlc init`
 # ---------------------------------------------------------------------------
 
 _PROJECT_DEFAULTS = {
@@ -62,13 +62,13 @@ def _detect_project_type(directory: Path) -> str:
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="csdlc")
+@click.version_option(version=__version__, prog_name="bsdlc")
 def main():
     """Automate your Claude Code SDLC — from story creation through code review and traceability."""
 
 
 # ---------------------------------------------------------------------------
-# csdlc run
+# bsdlc run
 # ---------------------------------------------------------------------------
 
 
@@ -95,7 +95,7 @@ def main():
 def run(story, skip_create, skip_atdd, skip_trace, review_mode, resume, resume_from,
         dry_run, clean, verbose):
     """Execute the full pipeline for a story."""
-    from claude_sdlc.orchestrator import run_pipeline
+    from bmad_sdlc.orchestrator import run_pipeline
 
     run_pipeline(
         story,
@@ -112,7 +112,7 @@ def run(story, skip_create, skip_atdd, skip_trace, review_mode, resume, resume_f
 
 
 # ---------------------------------------------------------------------------
-# csdlc init
+# bsdlc init
 # ---------------------------------------------------------------------------
 
 
@@ -124,9 +124,9 @@ def run(story, skip_create, skip_atdd, skip_trace, review_mode, resume, resume_f
 @click.option("--tea-only", is_flag=True, default=False,
               help="Run only TEA bootstrap (skip config generation)")
 def init(non_interactive, skip_tea, tea_only):
-    """Generate .csdlc/config.yaml for this project."""
+    """Generate .bsdlc/config.yaml for this project."""
     cwd = Path.cwd()
-    config_dir = cwd / ".csdlc"
+    config_dir = cwd / ".bsdlc"
     config_path = config_dir / "config.yaml"
 
     if skip_tea and tea_only:
@@ -135,7 +135,7 @@ def init(non_interactive, skip_tea, tea_only):
     # --tea-only: skip config generation, jump to TEA bootstrap
     if tea_only:
         if not config_path.exists():
-            click.echo("ERROR: .csdlc/config.yaml not found. Run 'csdlc init' first.")
+            click.echo("ERROR: .bsdlc/config.yaml not found. Run 'bsdlc init' first.")
             raise SystemExit(1)
         _run_tea_bootstrap(cwd, config_path)
         return
@@ -186,7 +186,7 @@ def init(non_interactive, skip_tea, tea_only):
         raise SystemExit(1)
 
     # Locate template: prefer package-bundled copy, fall back to repo root
-    pkg_templates = importlib.resources.files("claude_sdlc.templates")
+    pkg_templates = importlib.resources.files("bmad_sdlc.templates")
     pkg_template_path = pkg_templates / "config.yaml.j2"
     if pkg_template_path.is_file():
         template_dir = str(pkg_templates)
@@ -219,7 +219,7 @@ def init(non_interactive, skip_tea, tea_only):
 
     # Append to .gitignore
     gitignore = cwd / ".gitignore"
-    gitignore_entry = ".csdlc/runs/"
+    gitignore_entry = ".bsdlc/runs/"
     if gitignore.exists():
         content = gitignore.read_text()
         if gitignore_entry not in content:
@@ -239,8 +239,8 @@ def init(non_interactive, skip_tea, tea_only):
 
 def _run_tea_bootstrap(cwd: Path, config_path: Path):
     """Run TEA framework scaffold and test design as Claude sessions."""
-    from claude_sdlc.config import load_config
-    from claude_sdlc.runner import run_workflow
+    from bmad_sdlc.config import load_config
+    from bmad_sdlc.runner import run_workflow
 
     try:
         config = load_config(config_path)
@@ -299,7 +299,7 @@ def _run_tea_bootstrap(cwd: Path, config_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# csdlc validate
+# bsdlc validate
 # ---------------------------------------------------------------------------
 
 
@@ -309,16 +309,16 @@ def validate():
     all_passed = True
 
     # Check 1: Config YAML parses and validates
-    config_path = Path.cwd() / ".csdlc" / "config.yaml"
+    config_path = Path.cwd() / ".bsdlc" / "config.yaml"
     raw = None
     if not config_path.exists():
-        click.echo("[FAIL] Config file: .csdlc/config.yaml not found")
+        click.echo("[FAIL] Config file: .bsdlc/config.yaml not found")
         all_passed = False
     else:
         try:
-            from claude_sdlc.config import load_config
+            from bmad_sdlc.config import load_config
             load_config(config_path)
-            click.echo("[PASS] Config file: .csdlc/config.yaml parses and validates")
+            click.echo("[PASS] Config file: .bsdlc/config.yaml parses and validates")
         except Exception as e:
             click.echo(f"[FAIL] Config file: {e}")
             all_passed = False
@@ -359,7 +359,7 @@ def validate():
         click.echo("[PASS] Plugins: none configured")
     else:
         import importlib.metadata
-        eps = importlib.metadata.entry_points(group="claude_sdlc.plugins")
+        eps = importlib.metadata.entry_points(group="bmad_sdlc.plugins")
         ep_map = {ep.name: ep for ep in eps}
         for name in plugin_names:
             if name in ep_map:
@@ -370,13 +370,13 @@ def validate():
                     click.echo(f"[FAIL] Plugin: '{name}' entry point found but failed to load ({e})")
                     all_passed = False
             else:
-                click.echo(f"[FAIL] Plugin: '{name}' not found in claude_sdlc.plugins entry points")
+                click.echo(f"[FAIL] Plugin: '{name}' not found in bmad_sdlc.plugins entry points")
                 all_passed = False
 
     # Check 5: TEA readiness (informational — warn, don't fail)
     # Use loaded config paths for consistency with _run_tea_bootstrap
     try:
-        from claude_sdlc.config import load_config as _load_config
+        from bmad_sdlc.config import load_config as _load_config
         _cfg = _load_config(config_path)
         test_artifacts_dir = Path(_cfg.paths.test_artifacts)
     except Exception:
@@ -392,7 +392,7 @@ def validate():
             missing.append("framework scaffold")
         if not has_test_design:
             missing.append("test design")
-        click.echo(f"[WARN] TEA: missing {', '.join(missing)}. Run: csdlc init --tea-only")
+        click.echo(f"[WARN] TEA: missing {', '.join(missing)}. Run: bsdlc init --tea-only")
 
     # Summary
     if all_passed:
@@ -403,20 +403,20 @@ def validate():
 
 
 # ---------------------------------------------------------------------------
-# csdlc setup-ci
+# bsdlc setup-ci
 # ---------------------------------------------------------------------------
 
 
 @main.command("setup-ci")
 def setup_ci():
     """Scaffold CI/CD pipeline configuration via TEA testarch-ci skill."""
-    config_path = Path.cwd() / ".csdlc" / "config.yaml"
+    config_path = Path.cwd() / ".bsdlc" / "config.yaml"
     if not config_path.exists():
-        click.echo("ERROR: .csdlc/config.yaml not found. Run 'csdlc init' first.")
+        click.echo("ERROR: .bsdlc/config.yaml not found. Run 'bsdlc init' first.")
         raise SystemExit(1)
 
-    from claude_sdlc.config import load_config
-    from claude_sdlc.runner import run_workflow
+    from bmad_sdlc.config import load_config
+    from bmad_sdlc.runner import run_workflow
 
     try:
         config = load_config(config_path)
