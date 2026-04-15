@@ -55,6 +55,6 @@ safety:
 story:
   types: [scaffold, feature, refactor, bugfix]
   default_type: feature
-  pipeline_steps: [create-story, dev-story, code-review, trace]
+  pipeline_steps: [create-story, atdd, dev-story, code-review, trace]
 
 plugins: []
