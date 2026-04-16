@@ -358,12 +358,12 @@ def mode_b_resume_instructions(story_key: str, run_dir: str, config: Config) -> 
 
 3. Resume the automation pipeline:
    ```bash
-   bsdlc run --story {story_key} --resume
+   bmpipe run --story {story_key} --resume
    ```
 
 4. Or resume from a specific step:
    ```bash
-   bsdlc run --story {story_key} --resume-from code-review
+   bmpipe run --story {story_key} --resume-from code-review
    ```
 
 ## Run directory

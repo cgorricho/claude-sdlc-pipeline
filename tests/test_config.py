@@ -17,11 +17,11 @@ from bmad_sdlc.config import (
 
 @pytest.fixture()
 def config_dir(tmp_path):
-    """Create a .bsdlc directory with a minimal valid config."""
-    bsdlc = tmp_path / ".bsdlc"
-    bsdlc.mkdir()
-    (tmp_path / ".bsdlc" / "runs").mkdir()
-    return bsdlc
+    """Create a .bmpipe directory with a minimal valid config."""
+    bmpipe = tmp_path / ".bmpipe"
+    bmpipe.mkdir()
+    (tmp_path / ".bmpipe" / "runs").mkdir()
+    return bmpipe
 
 
 def _write_config(config_dir: Path, data: dict) -> Path:
@@ -107,7 +107,7 @@ class TestValidConfig:
 
 class TestMissingFile:
     def test_missing_file_raises(self, tmp_path):
-        missing = tmp_path / ".bsdlc" / "config.yaml"
+        missing = tmp_path / ".bmpipe" / "config.yaml"
         with pytest.raises(FileNotFoundError, match="Config file not found"):
             load_config(missing)
 
@@ -191,7 +191,7 @@ class TestProjectRootInterpolation:
         )
         path = _write_config(config_dir, data)
         config = load_config(path)
-        # project.root is ".." relative to .bsdlc/, so project_root = tmp_path
+        # project.root is ".." relative to .bmpipe/, so project_root = tmp_path
         project_root = str(config_dir.parent.resolve())
         assert config.paths.sprint_status == str(Path(project_root) / "custom" / "status.yaml")
 

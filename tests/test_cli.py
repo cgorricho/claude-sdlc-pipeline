@@ -1,4 +1,4 @@
-"""Tests for the bsdlc CLI entry point."""
+"""Tests for the bmpipe CLI entry point."""
 
 from __future__ import annotations
 
@@ -64,11 +64,11 @@ class TestHelpOutput:
     def test_version(self, runner):
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "bsdlc" in result.output
+        assert "bmpipe" in result.output
 
 
 # ---------------------------------------------------------------------------
-# bsdlc run
+# bmpipe run
 # ---------------------------------------------------------------------------
 
 
@@ -144,7 +144,7 @@ class TestRun:
 
 
 # ---------------------------------------------------------------------------
-# bsdlc init
+# bmpipe init
 # ---------------------------------------------------------------------------
 
 
@@ -158,12 +158,12 @@ class TestInit:
             assert result.exit_code == 0
             assert "Created" in result.output
 
-            config_path = Path(".bsdlc/config.yaml")
+            config_path = Path(".bmpipe/config.yaml")
             assert config_path.exists()
             content = config_path.read_text()
             assert "pytest" in content
 
-            assert Path(".bsdlc/runs").is_dir()
+            assert Path(".bmpipe/runs").is_dir()
 
     def test_init_non_interactive_node_detection(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
@@ -172,7 +172,7 @@ class TestInit:
             result = runner.invoke(main, ["init", "--non-interactive", "--skip-tea"])
             assert result.exit_code == 0
 
-            content = Path(".bsdlc/config.yaml").read_text()
+            content = Path(".bmpipe/config.yaml").read_text()
             assert "npm run build" in content
             assert "vitest" in content
 
@@ -183,7 +183,7 @@ class TestInit:
             result = runner.invoke(main, ["init", "--non-interactive", "--skip-tea"])
             assert result.exit_code == 0
 
-            content = Path(".bsdlc/config.yaml").read_text()
+            content = Path(".bmpipe/config.yaml").read_text()
             assert "go build" in content
             assert "go test" in content
 
@@ -200,7 +200,7 @@ class TestInit:
 
             gitignore = Path(".gitignore")
             assert gitignore.exists()
-            assert ".bsdlc/runs/" in gitignore.read_text()
+            assert ".bmpipe/runs/" in gitignore.read_text()
 
     def test_init_appends_to_existing_gitignore(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
@@ -211,11 +211,11 @@ class TestInit:
 
             content = Path(".gitignore").read_text()
             assert "node_modules/" in content
-            assert ".bsdlc/runs/" in content
+            assert ".bmpipe/runs/" in content
 
     def test_init_skips_gitignore_if_already_present(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
-            Path(".gitignore").write_text(".bsdlc/runs/\n")
+            Path(".gitignore").write_text(".bmpipe/runs/\n")
 
             result = runner.invoke(main, ["init", "--non-interactive", "--skip-tea"])
             assert result.exit_code == 0
@@ -223,8 +223,8 @@ class TestInit:
 
     def test_init_non_interactive_refuses_overwrite(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
-            Path(".bsdlc").mkdir()
-            Path(".bsdlc/config.yaml").write_text("existing: true\n")
+            Path(".bmpipe").mkdir()
+            Path(".bmpipe/config.yaml").write_text("existing: true\n")
 
             result = runner.invoke(main, ["init", "--non-interactive", "--skip-tea"])
             assert result.exit_code == 1
@@ -232,8 +232,8 @@ class TestInit:
 
     def test_init_interactive_overwrite_confirm(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
-            Path(".bsdlc").mkdir()
-            Path(".bsdlc/config.yaml").write_text("existing: true\n")
+            Path(".bmpipe").mkdir()
+            Path(".bmpipe/config.yaml").write_text("existing: true\n")
 
             # Say yes to overwrite, then accept all defaults
             result = runner.invoke(main, ["init", "--skip-tea"], input="y\ntest-proj\necho build\npytest\n[]\nopus\nsonnet\n")
@@ -242,8 +242,8 @@ class TestInit:
 
     def test_init_interactive_overwrite_abort(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
-            Path(".bsdlc").mkdir()
-            Path(".bsdlc/config.yaml").write_text("existing: true\n")
+            Path(".bmpipe").mkdir()
+            Path(".bmpipe/config.yaml").write_text("existing: true\n")
 
             result = runner.invoke(main, ["init"], input="n\n")
             assert result.exit_code == 0
@@ -251,7 +251,7 @@ class TestInit:
 
 
 # ---------------------------------------------------------------------------
-# bsdlc validate
+# bmpipe validate
 # ---------------------------------------------------------------------------
 
 
@@ -266,7 +266,7 @@ class TestValidate:
     def test_validate_with_valid_config(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
             # Create a minimal valid config
-            config_dir = Path(".bsdlc")
+            config_dir = Path(".bmpipe")
             config_dir.mkdir()
             (config_dir / "config.yaml").write_text(
                 "project:\n  root: .\n  name: test\n"
@@ -282,7 +282,7 @@ class TestValidate:
 
     def test_validate_claude_not_found(self, runner, tmp_path):
         with runner.isolated_filesystem(temp_dir=tmp_path):
-            config_dir = Path(".bsdlc")
+            config_dir = Path(".bmpipe")
             config_dir.mkdir()
             (config_dir / "config.yaml").write_text(
                 "project:\n  root: .\n  name: test\n"
@@ -297,7 +297,7 @@ class TestValidate:
     def test_validate_tea_pass(self, runner, tmp_path):
         """TEA check passes when framework + test design files exist."""
         with runner.isolated_filesystem(temp_dir=tmp_path):
-            config_dir = Path(".bsdlc")
+            config_dir = Path(".bmpipe")
             config_dir.mkdir()
             (config_dir / "config.yaml").write_text(
                 "project:\n  root: ..\n  name: test\n"
@@ -316,7 +316,7 @@ class TestValidate:
     def test_validate_tea_warn(self, runner, tmp_path):
         """TEA check warns when artifacts are missing."""
         with runner.isolated_filesystem(temp_dir=tmp_path):
-            config_dir = Path(".bsdlc")
+            config_dir = Path(".bmpipe")
             config_dir.mkdir()
             (config_dir / "config.yaml").write_text(
                 "project:\n  root: ..\n  name: test\n"
@@ -326,11 +326,11 @@ class TestValidate:
 
             result = runner.invoke(main, ["validate"])
             assert "[WARN] TEA:" in result.output
-            assert "bsdlc init --tea-only" in result.output
+            assert "bmpipe init --tea-only" in result.output
 
 
 # ---------------------------------------------------------------------------
-# bsdlc run --skip-atdd
+# bmpipe run --skip-atdd
 # ---------------------------------------------------------------------------
 
 
@@ -354,7 +354,7 @@ class TestRunSkipAtdd:
 
 
 # ---------------------------------------------------------------------------
-# bsdlc init --skip-tea / --tea-only
+# bmpipe init --skip-tea / --tea-only
 # ---------------------------------------------------------------------------
 
 
@@ -378,7 +378,7 @@ class TestInitTea:
 
 
 # ---------------------------------------------------------------------------
-# bsdlc setup-ci
+# bmpipe setup-ci
 # ---------------------------------------------------------------------------
 
 

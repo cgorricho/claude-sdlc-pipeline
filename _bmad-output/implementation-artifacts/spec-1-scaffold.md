@@ -14,7 +14,7 @@ context:
 
 **Problem:** The story automation pipeline (7 source files, ~2,742 lines) lives inside `who_else_is_here/automation/` with bare relative imports (`from config import ...`). It needs to become a standalone pip-installable package in this repo.
 
-**Approach:** Copy all source and test files into `src/bmad_sdlc/` package layout, rewrite imports to use the `bmad_sdlc.` package prefix, create `pyproject.toml` with a `bsdlc` console script entry point, and set up GitHub Actions CI. No logic changes — this is purely structural.
+**Approach:** Copy all source and test files into `src/bmad_sdlc/` package layout, rewrite imports to use the `bmad_sdlc.` package prefix, create `pyproject.toml` with a `bmpipe` console script entry point, and set up GitHub Actions CI. No logic changes — this is purely structural.
 
 ## Boundaries & Constraints
 
@@ -56,7 +56,7 @@ context:
 - [x] `LICENSE` -- MIT license file
 
 **Acceptance Criteria:**
-- Given the package is installed with `pip install -e .`, when running `bsdlc --help`, then usage text is printed
+- Given the package is installed with `pip install -e .`, when running `bmpipe --help`, then usage text is printed
 - Given `src/bmad_sdlc/` exists, when running `grep -r "who_else_is_here\|whoelseishere" src/`, then zero matches are returned
 - Given all files are copied, when running `grep -rn "^from config import\|^from contracts import\|^from prompts import\|^from run_log import\|^from runner import\|^from state import\|^from auto_story import" src/ tests/`, then zero matches (all imports use `bmad_sdlc.` prefix)
 - Given CI config exists, when inspecting `.github/workflows/ci.yml`, then it runs `pytest` and `ruff check` on push
@@ -69,7 +69,7 @@ Import rewriting must cover all forms: `from config import X`, `from config impo
 
 **Commands:**
 - `pip install -e .` -- expected: successful installation, no errors
-- `bsdlc --help` -- expected: prints click help text
+- `bmpipe --help` -- expected: prints click help text
 - `grep -r "who_else_is_here\|whoelseishere" src/` -- expected: zero matches
 - `grep -rn "^from config import\|^from contracts import\|^from prompts import\|^from run_log import\|^from runner import\|^from state import\|^from auto_story import" src/ tests/` -- expected: zero matches
 - `ruff check src/ tests/` -- expected: passes (or only pre-existing issues)
@@ -85,7 +85,7 @@ Import rewriting must cover all forms: `from config import X`, `from config impo
 - Version and public API surface
   [`__init__.py:1`](../../src/bmad_sdlc/__init__.py#L1)
 
-- Stub CLI wired as `bsdlc` — confirms entry point works
+- Stub CLI wired as `bmpipe` — confirms entry point works
   [`cli.py:1`](../../src/bmad_sdlc/cli.py#L1)
 
 **Import rewriting (the core change)**

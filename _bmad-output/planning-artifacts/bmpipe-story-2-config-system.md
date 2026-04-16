@@ -15,7 +15,7 @@ The current `src/bmad_sdlc/config.py` (copied from who_else_is_here) is a flat m
 
 ### Solution
 
-Replace the flat constants module with a `Config` frozen dataclass loaded from `.bsdlc/config.yaml`. All downstream code will access configuration through `get_config()` returning an immutable `Config` instance. The YAML schema, variable interpolation, and validation are all defined in the tech spec Section 5.
+Replace the flat constants module with a `Config` frozen dataclass loaded from `.bmpipe/config.yaml`. All downstream code will access configuration through `get_config()` returning an immutable `Config` instance. The YAML schema, variable interpolation, and validation are all defined in the tech spec Section 5.
 
 This is a **rewrite of one file** (`config.py`) plus **updating imports** in all files that use it.
 
@@ -32,8 +32,8 @@ This is a **rewrite of one file** (`config.py`) plus **updating imports** in all
 - Update imports in all files that currently do `from bmad_sdlc.config import CONSTANT`
 
 **Out of Scope:**
-- `bsdlc init` command to generate config (Story 3)
-- `bsdlc validate` command (Story 3)
+- `bmpipe init` command to generate config (Story 3)
+- `bmpipe validate` command (Story 3)
 - Changing orchestrator logic (Story 4)
 - Changing prompt templates (Story 6)
 
@@ -115,7 +115,7 @@ These files will be updated in Stories 4 and 6 for their logic changes, but the 
    - `extra_inference_keywords` cannot override/remove builtins
    - `get_config()` returns same instance (singleton)
 
-3. Create a sample `.bsdlc/config.yaml` in the project root matching the schema in tech spec Section 5, pre-filled for the bmad-sdlc project itself (it will eventually test itself)
+3. Create a sample `.bmpipe/config.yaml` in the project root matching the schema in tech spec Section 5, pre-filled for the bmad-sdlc project itself (it will eventually test itself)
 
 4. Add `pyyaml>=6.0` to dependencies in `pyproject.toml` if not already present
 
@@ -123,7 +123,7 @@ These files will be updated in Stories 4 and 6 for their logic changes, but the 
 
 ## Acceptance Criteria
 
-**AC-1**: `Config` dataclass loads from `.bsdlc/config.yaml` with full validation — missing required keys produce clear error messages naming the missing key
+**AC-1**: `Config` dataclass loads from `.bmpipe/config.yaml` with full validation — missing required keys produce clear error messages naming the missing key
 
 **AC-2**: All values currently hardcoded in `config.py` are represented in the YAML schema — zero module-level constants remain (except temporary re-export aliases)
 

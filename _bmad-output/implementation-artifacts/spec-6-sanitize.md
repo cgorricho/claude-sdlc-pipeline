@@ -102,7 +102,7 @@ context:
 - Hardcoded paths/commands replaced in Mode B prompts
   [`prompts.py:269`](../../src/bmad_sdlc/prompts.py#L269)
 
-- Resume instructions: `python automation/auto_story.py` replaced with `bsdlc run`
+- Resume instructions: `python automation/auto_story.py` replaced with `bmpipe run`
   [`prompts.py:341`](../../src/bmad_sdlc/prompts.py#L341)
 
 **Runner sanitization**

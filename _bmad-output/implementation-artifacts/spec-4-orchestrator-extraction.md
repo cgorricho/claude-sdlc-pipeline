@@ -69,7 +69,7 @@ context:
 - Given `orchestrator.py` after changes, when searching for `_bmad-output` or `packages/` or `e2e/` strings, then zero hardcoded path references exist
 - Given `orchestrator.py` after changes, when searching for `run_schema_drift_check`, then the function is gone and a plugin hook comment exists in its place
 - Given `orchestrator.py` after changes, when diffing the review mode logic, retry+escalation, and Mode A/B routing blocks, then these are structurally unchanged (only variable names differ)
-- Given a valid `.bsdlc/config.yaml`, when `run_pipeline("1-3", dry_run=True)` executes, then it uses config values (not hardcoded defaults) for model names and step listing
+- Given a valid `.bmpipe/config.yaml`, when `run_pipeline("1-3", dry_run=True)` executes, then it uses config values (not hardcoded defaults) for model names and step listing
 - Given `tests/test_orchestrator.py`, when `pytest tests/test_orchestrator.py -v` runs, then all tests pass with config mocking
 
 ## Spec Change Log

@@ -30,23 +30,23 @@ pip install bmad-sdlc
 
 ```bash
 # 1. Initialize config (auto-detects project type)
-bsdlc init
+bmpipe init
 
 # 2. Verify environment
-bsdlc validate
+bmpipe validate
 
 # 3. Run the full pipeline for a story
-bsdlc run --story 1-3
+bmpipe run --story 1-3
 ```
 
 ## CLI Reference
 
-### `bsdlc run`
+### `bmpipe run`
 
 Execute the full pipeline for a story.
 
 ```
-bsdlc run --story <key> [OPTIONS]
+bmpipe run --story <key> [OPTIONS]
 ```
 
 | Option | Type | Default | Description |
@@ -61,38 +61,38 @@ bsdlc run --story <key> [OPTIONS]
 | `--clean` | flag | `false` | `git stash` uncommitted changes before starting |
 | `-v`, `--verbose` | flag | `false` | Stream full Claude output to terminal |
 
-### `bsdlc init`
+### `bmpipe init`
 
-Generate `.bsdlc/config.yaml` for the current project.
+Generate `.bmpipe/config.yaml` for the current project.
 
 ```
-bsdlc init [--non-interactive]
+bmpipe init [--non-interactive]
 ```
 
 In interactive mode (default), the command:
 1. Detects project type from manifest files (`package.json` = Node.js, `pyproject.toml` = Python, `go.mod` = Go)
 2. Prompts for project name, build/test commands, and model choices with sensible defaults
-3. Writes `.bsdlc/config.yaml`, creates `.bsdlc/runs/`, and appends `.bsdlc/runs/` to `.gitignore`
+3. Writes `.bmpipe/config.yaml`, creates `.bmpipe/runs/`, and appends `.bmpipe/runs/` to `.gitignore`
 
 With `--non-interactive`, uses all detected defaults without prompting.
 
-### `bsdlc validate`
+### `bmpipe validate`
 
 Check config and environment readiness.
 
 ```
-bsdlc validate
+bmpipe validate
 ```
 
 Checks:
-- `.bsdlc/config.yaml` parses and validates
+- `.bmpipe/config.yaml` parses and validates
 - Claude binary is on PATH
 - Build command executable is on PATH
 - All configured plugins resolve and load
 
 Exits `0` if all pass, `1` if any fail.
 
-### `bsdlc --version`
+### `bmpipe --version`
 
 Print the installed version.
 
@@ -164,13 +164,13 @@ Tags are inferred from story content using the inference keyword map. Built-in k
 
 ## Configuration Reference
 
-Configuration lives in `.bsdlc/config.yaml`. Generate a starter config with `bsdlc init`.
+Configuration lives in `.bmpipe/config.yaml`. Generate a starter config with `bmpipe init`.
 
 ### `project`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `root` | string | `"."` | Project root relative to `.bsdlc/` directory (resolved to absolute) |
+| `root` | string | `"."` | Project root relative to `.bmpipe/` directory (resolved to absolute) |
 | `name` | string | `""` | **Required.** Project name |
 | `source_dirs` | list[string] | `[]` | Source directories for code analysis |
 | `exclude_patterns` | list[string] | `["node_modules", "dist", ".next", ".turbo"]` | Glob patterns to exclude from source scanning |
@@ -185,7 +185,7 @@ All paths support `{project_root}` placeholder interpolation and are resolved to
 | `impl_artifacts` | string | `"_bmad-output/implementation-artifacts"` | Implementation artifact output directory |
 | `planning_artifacts` | string | `"_bmad-output/planning-artifacts"` | Planning artifact directory |
 | `test_artifacts` | string | `"_bmad-output/test-artifacts"` | Test artifact output directory |
-| `runs` | string | `".bsdlc/runs"` | Pipeline run logs directory |
+| `runs` | string | `".bmpipe/runs"` | Pipeline run logs directory |
 
 ### `models`
 
@@ -351,7 +351,7 @@ Add an entry point in your package's `pyproject.toml`:
 my_check = "my_package.my_module:MyCheckClass"
 ```
 
-Then enable it in `.bsdlc/config.yaml`:
+Then enable it in `.bmpipe/config.yaml`:
 
 ```yaml
 plugins:
@@ -385,20 +385,20 @@ For projects currently using the embedded `automation/` directory (e.g. the orig
 2. **Initialize configuration:**
    ```bash
    cd /path/to/your-project
-   bsdlc init
+   bmpipe init
    ```
    The init command auto-detects your project type (Node.js, Python, Go) and pre-fills sensible defaults for build/test commands.
 
-3. **Edit `.bsdlc/config.yaml`** if needed:
+3. **Edit `.bmpipe/config.yaml`** if needed:
    - Add `drizzle_drift_check` to `plugins:` if you use Drizzle ORM
    - Adjust model choices, timeouts, or paths as needed
 
 4. **Verify with a dry run:**
    ```bash
-   bsdlc run --story <key> --dry-run
+   bmpipe run --story <key> --dry-run
    ```
 
-5. **Update references:** Replace any scripts or documentation that reference `python automation/auto_story.py` with `bsdlc run`.
+5. **Update references:** Replace any scripts or documentation that reference `python automation/auto_story.py` with `bmpipe run`.
 
 6. **Remove the embedded pipeline:**
    ```bash
@@ -409,8 +409,8 @@ For projects currently using the embedded `automation/` directory (e.g. the orig
 
 - Pipeline behavior is identical — same 4-step BMAD workflow cycle, same contract validation, same review mode logic
 - Drizzle drift check is now opt-in via the `plugins:` config key (previously hardcoded)
-- Configuration moves from hardcoded constants to `.bsdlc/config.yaml`
-- All commands go through the `bsdlc` CLI instead of direct Python script invocation
+- Configuration moves from hardcoded constants to `.bmpipe/config.yaml`
+- All commands go through the `bmpipe` CLI instead of direct Python script invocation
 
 ## License
 

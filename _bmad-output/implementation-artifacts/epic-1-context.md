@@ -10,7 +10,7 @@ Extract the story automation pipeline (7 Python files, ~2,760 lines) from an emb
 
 - Story 1: Repository Scaffold & Package Structure
 - Story 2: YAML Configuration System
-- Story 3: CLI Entry Point (`bsdlc`)
+- Story 3: CLI Entry Point (`bmpipe`)
 - Story 4: Orchestrator Extraction
 - Story 5: Plugin System & Drizzle Migration
 - Story 6: Prompt, Runner, State & Contract Sanitization
@@ -18,14 +18,14 @@ Extract the story automation pipeline (7 Python files, ~2,760 lines) from an emb
 
 ## Requirements & Constraints
 
-- All user-facing configuration (build/test commands, workflow skill names, model choices, timeouts, path layout, plugin list) must be sourced from `.bsdlc/config.yaml` via a frozen `Config` dataclass — no module-level constants.
+- All user-facing configuration (build/test commands, workflow skill names, model choices, timeouts, path layout, plugin list) must be sourced from `.bmpipe/config.yaml` via a frozen `Config` dataclass — no module-level constants.
 - `INFERENCE_KEYWORD_MAP` and `MODE_B_TAGS` are hardcoded safety invariants in the Config dataclass. User config merges on top — it cannot remove built-in entries.
 - Story types default to `[scaffold, feature, refactor, bugfix]` with `feature` as default.
 - Path values support `{project_root}` and `{runs_dir}` placeholder interpolation.
 
 ## Technical Decisions
 
-- Package layout: `src/bmad_sdlc/` with CLI entry point `bsdlc` via Click.
+- Package layout: `src/bmad_sdlc/` with CLI entry point `bmpipe` via Click.
 - Config loaded via `get_config()` returning a frozen `Config` dataclass; no module-level constants exported.
 - Plugin system uses `PreReviewCheck` Protocol with `CheckResult` dataclass, loaded via `importlib.metadata.entry_points`.
 - Build/test commands split via `shlex.split()` for subprocess execution.

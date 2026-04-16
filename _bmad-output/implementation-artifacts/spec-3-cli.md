@@ -1,5 +1,5 @@
 ---
-title: 'Story 3 — CLI Entry Point (bsdlc)'
+title: 'Story 3 — CLI Entry Point (bmpipe)'
 type: 'feature'
 created: '2026-04-12'
 status: 'done'
@@ -12,7 +12,7 @@ context:
 
 ## Intent
 
-**Problem:** The pipeline is invoked via `python automation/auto_story.py <args>` using argparse inside `orchestrator.py:main()`. The standalone package needs a proper CLI entry point (`bsdlc`) with subcommands: `run`, `init`, and `validate`.
+**Problem:** The pipeline is invoked via `python automation/auto_story.py <args>` using argparse inside `orchestrator.py:main()`. The standalone package needs a proper CLI entry point (`bmpipe`) with subcommands: `run`, `init`, and `validate`.
 
 **Approach:** Replace the argparse block in `orchestrator.py` with a click-based CLI in `cli.py`. Extract the pipeline logic into `run_pipeline()` that accepts explicit parameters. Add `init` (interactive project-type detection + config generation) and `validate` (config + environment checks). Use Jinja2 template for config generation.
 
@@ -37,16 +37,16 @@ context:
 
 | Scenario | Input / State | Expected Output / Behavior | Error Handling |
 |----------|--------------|---------------------------|----------------|
-| `bsdlc run --story 1-3` | Valid config, clean env | Calls `run_pipeline("1-3", ...)` with all defaults | N/A |
-| `bsdlc run` (no story) | Missing required option | Click prints usage error | click handles automatically |
-| `bsdlc init` in Python project | `pyproject.toml` exists | Detects Python, pre-fills `pytest`/build commands, prompts for rest | N/A |
-| `bsdlc init` in Node project | `package.json` exists | Detects Node, pre-fills `npm run build`/`vitest` commands | N/A |
-| `bsdlc init` no detection | No known project files | Uses generic defaults, prompts for all | N/A |
-| `bsdlc init --non-interactive` | Any state | Writes config with detected defaults, no prompts | N/A |
-| `bsdlc init` with existing config | `.bsdlc/config.yaml` exists | Prompts to overwrite or abort | N/A |
-| `bsdlc validate` all pass | Valid config, Claude on PATH, build resolves | Prints pass summary, exit 0 | N/A |
-| `bsdlc validate` config missing | No `.bsdlc/config.yaml` | Prints FAIL for config, exit 1 | N/A |
-| `bsdlc validate` Claude not found | `claude` not on PATH | Prints FAIL for Claude binary, exit 1 | N/A |
+| `bmpipe run --story 1-3` | Valid config, clean env | Calls `run_pipeline("1-3", ...)` with all defaults | N/A |
+| `bmpipe run` (no story) | Missing required option | Click prints usage error | click handles automatically |
+| `bmpipe init` in Python project | `pyproject.toml` exists | Detects Python, pre-fills `pytest`/build commands, prompts for rest | N/A |
+| `bmpipe init` in Node project | `package.json` exists | Detects Node, pre-fills `npm run build`/`vitest` commands | N/A |
+| `bmpipe init` no detection | No known project files | Uses generic defaults, prompts for all | N/A |
+| `bmpipe init --non-interactive` | Any state | Writes config with detected defaults, no prompts | N/A |
+| `bmpipe init` with existing config | `.bmpipe/config.yaml` exists | Prompts to overwrite or abort | N/A |
+| `bmpipe validate` all pass | Valid config, Claude on PATH, build resolves | Prints pass summary, exit 0 | N/A |
+| `bmpipe validate` config missing | No `.bmpipe/config.yaml` | Prints FAIL for config, exit 1 | N/A |
+| `bmpipe validate` Claude not found | `claude` not on PATH | Prints FAIL for Claude binary, exit 1 | N/A |
 
 </frozen-after-approval>
 
@@ -54,7 +54,7 @@ context:
 
 - `src/bmad_sdlc/cli.py` -- REWRITE: Full click CLI with `run`, `init`, `validate` subcommands
 - `src/bmad_sdlc/orchestrator.py` -- MODIFY: Extract `run_pipeline()` function, remove argparse block and `if __name__`
-- `templates/config.yaml.j2` -- NEW: Jinja2 template for `bsdlc init` config generation
+- `templates/config.yaml.j2` -- NEW: Jinja2 template for `bmpipe init` config generation
 - `pyproject.toml` -- MODIFY: Add `jinja2>=3.0` to dependencies
 - `tests/test_cli.py` -- NEW: Click CliRunner tests for all subcommands and edge cases
 
@@ -62,18 +62,18 @@ context:
 
 **Execution:**
 - [x] `src/bmad_sdlc/orchestrator.py` -- Extract a `run_pipeline(story_key, *, skip_create=False, skip_trace=False, resume=False, resume_from=None, review_mode=None, dry_run=False, clean=False, verbose=False)` function from lines 86+ of `main()`. Remove `import argparse`, the `ArgumentParser` block (lines 63-84), and `if __name__ == "__main__"` (lines 1254-1255). Keep `main()` as a thin wrapper calling `run_pipeline()` until Story 4 removes it.
-- [x] `src/bmad_sdlc/cli.py` -- Rewrite stub: `@click.group() main`, `run` command with all flags (`--story` required option, `--skip-create`, `--skip-trace`, `--resume`, `--resume-from` with choices from `PIPELINE_STEPS`, `--review-mode` choice A/B, `--dry-run`, `--clean`, `--verbose`). `run` calls `orchestrator.run_pipeline()`. `init` command with `--non-interactive` flag: detect project type, prompt or use defaults, render `templates/config.yaml.j2` to `.bsdlc/config.yaml`, create `.bsdlc/runs/`, append to `.gitignore`. `validate` command: check config parse, Claude binary on PATH via `shutil.which()`, build command resolves, print pass/fail summary.
+- [x] `src/bmad_sdlc/cli.py` -- Rewrite stub: `@click.group() main`, `run` command with all flags (`--story` required option, `--skip-create`, `--skip-trace`, `--resume`, `--resume-from` with choices from `PIPELINE_STEPS`, `--review-mode` choice A/B, `--dry-run`, `--clean`, `--verbose`). `run` calls `orchestrator.run_pipeline()`. `init` command with `--non-interactive` flag: detect project type, prompt or use defaults, render `templates/config.yaml.j2` to `.bmpipe/config.yaml`, create `.bmpipe/runs/`, append to `.gitignore`. `validate` command: check config parse, Claude binary on PATH via `shutil.which()`, build command resolves, print pass/fail summary.
 - [x] `templates/config.yaml.j2` -- Create Jinja2 template matching tech spec Section 5 schema with variables for project name, build/test commands, model choices, workflow names, and paths.
 - [x] `pyproject.toml` -- Add `jinja2>=3.0` to `dependencies` list.
-- [x] `tests/test_cli.py` -- Tests using `click.testing.CliRunner`: `bsdlc --help`, `bsdlc run --help`, `bsdlc run --story X` invokes pipeline, `bsdlc init --non-interactive` generates config, `bsdlc init` with existing config prompts overwrite, `bsdlc validate` pass/fail scenarios.
+- [x] `tests/test_cli.py` -- Tests using `click.testing.CliRunner`: `bmpipe --help`, `bmpipe run --help`, `bmpipe run --story X` invokes pipeline, `bmpipe init --non-interactive` generates config, `bmpipe init` with existing config prompts overwrite, `bmpipe validate` pass/fail scenarios.
 
 **Acceptance Criteria:**
-- Given `bsdlc run --story 1-3 --verbose --dry-run`, when invoked, then `run_pipeline` is called with `story_key="1-3"`, `verbose=True`, `dry_run=True` and all other flags at defaults
-- Given a directory with `pyproject.toml`, when `bsdlc init --non-interactive` runs, then `.bsdlc/config.yaml` is generated with Python-detected defaults and `.bsdlc/runs/` is created
-- Given a valid config and `claude` on PATH, when `bsdlc validate` runs, then all checks print PASS and exit code is 0
-- Given no `.bsdlc/config.yaml`, when `bsdlc validate` runs, then config check prints FAIL and exit code is 1
+- Given `bmpipe run --story 1-3 --verbose --dry-run`, when invoked, then `run_pipeline` is called with `story_key="1-3"`, `verbose=True`, `dry_run=True` and all other flags at defaults
+- Given a directory with `pyproject.toml`, when `bmpipe init --non-interactive` runs, then `.bmpipe/config.yaml` is generated with Python-detected defaults and `.bmpipe/runs/` is created
+- Given a valid config and `claude` on PATH, when `bmpipe validate` runs, then all checks print PASS and exit code is 0
+- Given no `.bmpipe/config.yaml`, when `bmpipe validate` runs, then config check prints FAIL and exit code is 1
 - Given `orchestrator.py` after changes, when searching for `argparse` or `if __name__`, then neither is found
-- Given `bsdlc --help`, `bsdlc run --help`, `bsdlc init --help`, `bsdlc validate --help`, when invoked, then each prints correct usage text
+- Given `bmpipe --help`, `bmpipe run --help`, `bmpipe init --help`, `bmpipe validate --help`, when invoked, then each prints correct usage text
 
 ## Design Notes
 
@@ -86,10 +86,10 @@ context:
 ## Verification
 
 **Commands:**
-- `bsdlc --help` -- expected: prints group help with run/init/validate subcommands
-- `bsdlc run --help` -- expected: lists all flags (--story, --skip-create, --skip-trace, etc.)
-- `bsdlc init --non-interactive` -- expected: generates `.bsdlc/config.yaml` (run in temp dir)
-- `bsdlc validate` -- expected: prints check results with pass/fail
+- `bmpipe --help` -- expected: prints group help with run/init/validate subcommands
+- `bmpipe run --help` -- expected: lists all flags (--story, --skip-create, --skip-trace, etc.)
+- `bmpipe init --non-interactive` -- expected: generates `.bmpipe/config.yaml` (run in temp dir)
+- `bmpipe validate` -- expected: prints check results with pass/fail
 - `pytest tests/test_cli.py -v` -- expected: all tests pass
 - `ruff check src/bmad_sdlc/cli.py` -- expected: passes
 

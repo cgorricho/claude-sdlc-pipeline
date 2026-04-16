@@ -53,10 +53,10 @@ context:
 - [x] Verify plugin guide -- Confirm `PreReviewCheck` protocol signature and `CheckResult` fields match `plugins/__init__.py`
 
 **Acceptance Criteria:**
-- Given a new user, when they read README, then they can install (`pip install -e .`), init (`bsdlc init`), validate (`bsdlc validate`), and run (`bsdlc run --story <key>`) without external help
+- Given a new user, when they read README, then they can install (`pip install -e .`), init (`bmpipe init`), validate (`bmpipe validate`), and run (`bmpipe run --story <key>`) without external help
 - Given the Config Reference section, when compared field-by-field to Config dataclass, then every YAML key has correct type, default, and description
 - Given the Plugin Authoring Guide, when followed step-by-step, then the user understands how to implement `PreReviewCheck`, register via entry_points, and sees DrizzleDriftCheck as a working example
-- Given the Migration Guide, when followed by an embedded `automation/` user, then they can transition to standalone `bsdlc` with no behavior change
+- Given the Migration Guide, when followed by an embedded `automation/` user, then they can transition to standalone `bmpipe` with no behavior change
 
 ## Spec Change Log
 
@@ -64,7 +64,7 @@ context:
 
 **Manual checks:**
 - Config reference section lists every field from Config, PathsConfig, ModelsConfig, ClaudeConfig, CodexConfig, BuildConfig, TestConfig, ReviewConfig, SafetyConfig, StoryConfig with correct defaults
-- CLI section documents `bsdlc run` (all flags), `bsdlc init` (`--non-interactive`), `bsdlc validate`
+- CLI section documents `bmpipe run` (all flags), `bmpipe init` (`--non-interactive`), `bmpipe validate`
 - Plugin guide shows `PreReviewCheck` protocol, `CheckResult`, entry_points registration
 - Migration guide covers: install, init, config adjustment, verify dry-run, remove automation/, update scripts
 
@@ -85,5 +85,5 @@ context:
 - Plugin authoring guide — protocol, example (DrizzleDriftCheck), and registration
   [`README.md:279`](../../README.md#L279)
 
-- Migration guide — 6-step transition from embedded automation/ to standalone bsdlc
+- Migration guide — 6-step transition from embedded automation/ to standalone bmpipe
   [`README.md:353`](../../README.md#L353)

@@ -85,7 +85,7 @@ This logic must be **preserved exactly** in the plugin, but with paths/commands 
    - Run each plugin's `run()` method
    - If any returns `CheckResult(passed=False)`, log the message and handle (fail the step or warn, based on existing escalation logic)
 
-5. Add `bsdlc validate` plugin check: when `validate` runs (Story 3), also check that plugins listed in config can be loaded
+5. Add `bmpipe validate` plugin check: when `validate` runs (Story 3), also check that plugins listed in config can be loaded
 
 6. Create `tests/test_plugins.py`:
    - Test `CheckResult` dataclass

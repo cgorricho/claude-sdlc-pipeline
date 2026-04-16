@@ -35,9 +35,9 @@ Write a comprehensive README.md plus a migration guide for existing embedded-pip
 1. Create `README.md` with these sections:
    - **What is this**: Value proposition from tech spec Section 1 — "Automate your Claude Code SDLC — from story creation through code review and traceability, with contract validation and audit trails."
    - **Install**: `pip install bmad-sdlc` (from PyPI, eventually) and `pip install -e .` (dev)
-   - **Quickstart**: `bsdlc init` → `bsdlc validate` → `bsdlc run --story <key>`
-   - **CLI Reference**: `bsdlc run` with all flags, `bsdlc init` with `--non-interactive`, `bsdlc validate`
-   - **Configuration Reference**: Document every key in `.bsdlc/config.yaml` with type, default, and description. Source this directly from the Config dataclass and tech spec Section 5.
+   - **Quickstart**: `bmpipe init` → `bmpipe validate` → `bmpipe run --story <key>`
+   - **CLI Reference**: `bmpipe run` with all flags, `bmpipe init` with `--non-interactive`, `bmpipe validate`
+   - **Configuration Reference**: Document every key in `.bmpipe/config.yaml` with type, default, and description. Source this directly from the Config dataclass and tech spec Section 5.
    - **Pipeline Steps**: Describe the 4-step flow (create-story → dev-story → code-review → trace) and what each does
    - **Review Modes**: Explain Mode A vs Mode B, auto-selection, safety invariants
    - **Plugin Authoring Guide**: How to write a `PreReviewCheck` plugin, register it via entry_points, example using `DrizzleDriftCheck` as reference
@@ -51,13 +51,13 @@ Write a comprehensive README.md plus a migration guide for existing embedded-pip
 
 ## Acceptance Criteria
 
-**AC-1**: README covers: what the tool does, install instructions, `bsdlc init` quickstart, `bsdlc run` usage, full config reference
+**AC-1**: README covers: what the tool does, install instructions, `bmpipe init` quickstart, `bmpipe run` usage, full config reference
 
 **AC-2**: Config reference documents every YAML key with type, default value, and description — verified against actual Config dataclass
 
 **AC-3**: Plugin authoring guide includes working example based on `DrizzleDriftCheck`
 
-**AC-4**: Migration guide documents steps to go from embedded `automation/` to standalone `bsdlc` — matches tech spec Section 11
+**AC-4**: Migration guide documents steps to go from embedded `automation/` to standalone `bmpipe` — matches tech spec Section 11
 
 ---
 

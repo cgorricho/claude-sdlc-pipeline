@@ -7,7 +7,7 @@ paths:
   impl_artifacts: _bmad-output/implementation-artifacts
   planning_artifacts: _bmad-output/planning-artifacts
   test_artifacts: _bmad-output/test-artifacts
-  runs: .bsdlc/runs
+  runs: .bmpipe/runs
 
 models:
   dev: opus

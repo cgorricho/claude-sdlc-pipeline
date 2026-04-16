@@ -12,9 +12,9 @@ context:
 
 ## Intent
 
-**Problem:** The pipeline's 4-step story cycle has no ATDD step (dev writes its own tests, sharing blind spots with the implementation) and TEA prerequisites (framework scaffold + test design) are assumed but never verified. A user running `bsdlc run --story 1-1` on a fresh install hits failures because TEA was never bootstrapped. Meanwhile there is no `bsdlc setup-ci` surface for the CI scaffold skill.
+**Problem:** The pipeline's 4-step story cycle has no ATDD step (dev writes its own tests, sharing blind spots with the implementation) and TEA prerequisites (framework scaffold + test design) are assumed but never verified. A user running `bmpipe run --story 1-1` on a fresh install hits failures because TEA was never bootstrapped. Meanwhile there is no `bmpipe setup-ci` surface for the CI scaffold skill.
 
-**Approach:** (1) Add `atdd` as a default pipeline step between create-story and dev-story with its own prompt builder, contract validator, and orchestrator block. (2) Extend `bsdlc init` to run TEA framework scaffold and test design as Claude sessions. (3) Add TEA readiness checks to `bsdlc validate`. (4) Add a `bsdlc setup-ci` subcommand that runs the `testarch-ci` skill.
+**Approach:** (1) Add `atdd` as a default pipeline step between create-story and dev-story with its own prompt builder, contract validator, and orchestrator block. (2) Extend `bmpipe init` to run TEA framework scaffold and test design as Claude sessions. (3) Add TEA readiness checks to `bmpipe validate`. (4) Add a `bmpipe setup-ci` subcommand that runs the `testarch-ci` skill.
 
 ## Boundaries & Constraints
 
@@ -23,12 +23,12 @@ context:
 - The ATDD step follows the identical dispatch pattern as existing steps: should_run_step check, StepLog, prompt builder, run_workflow, contract validation, run_log save
 - TEA bootstrap in init runs as Claude sessions via `run_workflow()` (same mechanism as pipeline steps)
 - Existing users with explicit `pipeline_steps: [create-story, dev-story, code-review, trace]` in their config keep their 4-step cycle -- no breakage
-- `bsdlc validate` TEA check is informational (warns, does not block non-TEA users)
+- `bmpipe validate` TEA check is informational (warns, does not block non-TEA users)
 
 **Ask First:**
 - If ATDD contract validator should enforce that generated tests actually fail (red phase), or just that test files were created
 - If TEA bootstrap timeout needs to differ from the 600s default
-- If `bsdlc init` TEA bootstrap should be opt-out (default) or opt-in
+- If `bmpipe init` TEA bootstrap should be opt-out (default) or opt-in
 
 **Never:**
 - Modify prompt or contract logic for existing steps (create-story, dev-story, code-review, trace)
@@ -47,8 +47,8 @@ context:
 | TEA bootstrap: already done | TEA artifacts exist | init skips with message | N/A |
 | TEA bootstrap: --skip-tea | Flag passed to init | TEA steps skipped entirely | N/A |
 | TEA validate: present | Framework + test design files found | `[PASS] TEA: framework scaffold present, test design present` | N/A |
-| TEA validate: missing | No TEA artifacts | `[WARN] TEA: not set up. Run: bsdlc init --tea-only` | Warning, not failure |
-| setup-ci | User runs `bsdlc setup-ci` | testarch-ci skill launched as Claude session | Exit code propagated |
+| TEA validate: missing | No TEA artifacts | `[WARN] TEA: not set up. Run: bmpipe init --tea-only` | Warning, not failure |
+| setup-ci | User runs `bmpipe setup-ci` | testarch-ci skill launched as Claude session | Exit code propagated |
 | Resume through ATDD | `--resume-from atdd` | Pipeline resumes from ATDD step | N/A |
 
 </frozen-after-approval>
@@ -83,14 +83,14 @@ context:
 
 **Acceptance Criteria:**
 - Given default config, when `config.story.pipeline_steps` is read, then it equals `["create-story", "atdd", "dev-story", "code-review", "trace"]`
-- Given `bsdlc run --story 1-1`, when all steps succeed, then the run log shows 5 steps including atdd between create-story and dev-story
-- Given `bsdlc run --story 1-1 --skip-atdd`, when the pipeline runs, then the atdd step is skipped and dev-story follows create-story directly
+- Given `bmpipe run --story 1-1`, when all steps succeed, then the run log shows 5 steps including atdd between create-story and dev-story
+- Given `bmpipe run --story 1-1 --skip-atdd`, when the pipeline runs, then the atdd step is skipped and dev-story follows create-story directly
 - Given a user config with `pipeline_steps: [create-story, dev-story, code-review, trace]`, when the pipeline runs, then `should_run_step("atdd", ...)` returns False and the 4-step cycle is preserved
-- Given `bsdlc init` on a fresh project without `--skip-tea`, when init completes, then TEA framework scaffold and test design sessions are launched
-- Given `bsdlc init --skip-tea`, when init completes, then TEA bootstrap is skipped entirely
-- Given `bsdlc validate` with TEA artifacts present, when validate runs, then output includes `[PASS] TEA:` line
-- Given `bsdlc validate` without TEA artifacts, when validate runs, then output includes `[WARN] TEA:` with remediation guidance (not `[FAIL]`)
-- Given `bsdlc setup-ci`, when run, then the testarch-ci skill is launched as a Claude session
+- Given `bmpipe init` on a fresh project without `--skip-tea`, when init completes, then TEA framework scaffold and test design sessions are launched
+- Given `bmpipe init --skip-tea`, when init completes, then TEA bootstrap is skipped entirely
+- Given `bmpipe validate` with TEA artifacts present, when validate runs, then output includes `[PASS] TEA:` line
+- Given `bmpipe validate` without TEA artifacts, when validate runs, then output includes `[WARN] TEA:` with remediation guidance (not `[FAIL]`)
+- Given `bmpipe setup-ci`, when run, then the testarch-ci skill is launched as a Claude session
 - Given `pytest tests/ -v`, when run, then all new and existing tests pass
 
 ## Spec Change Log
@@ -99,18 +99,18 @@ context:
 
 The ATDD step generates failing acceptance tests FROM the story's acceptance criteria BEFORE dev starts. Dev then codes to green against an independent test contract. This is complementary to the trace step: ATDD is bottom-up (story ACs), trace is top-down (PRD FRs/NFRs).
 
-TEA bootstrap in `bsdlc init` uses `run_workflow()` -- the same mechanism that launches Claude for pipeline steps. This avoids a separate execution path. The two TEA sessions (framework + test design) run sequentially because test design depends on the framework scaffold being in place.
+TEA bootstrap in `bmpipe init` uses `run_workflow()` -- the same mechanism that launches Claude for pipeline steps. This avoids a separate execution path. The two TEA sessions (framework + test design) run sequentially because test design depends on the framework scaffold being in place.
 
-The `bsdlc validate` TEA check uses `[WARN]` not `[FAIL]` because TEA is not strictly required for the 4-step cycle. Users who have not opted into ATDD/trace should not see failures.
+The `bmpipe validate` TEA check uses `[WARN]` not `[FAIL]` because TEA is not strictly required for the 4-step cycle. Users who have not opted into ATDD/trace should not see failures.
 
-`bsdlc setup-ci` is a separate subcommand (not part of init) because CI scaffold requires a real project with build artifacts and is a one-time action, not per-story.
+`bmpipe setup-ci` is a separate subcommand (not part of init) because CI scaffold requires a real project with build artifacts and is a one-time action, not per-story.
 
 ## Verification
 
 **Commands:**
 - `pytest tests/test_config.py tests/test_prompts.py tests/test_contracts.py tests/test_cli.py tests/test_orchestrator.py -v` -- expected: all tests pass
-- `bsdlc validate` -- expected: existing checks pass, new TEA check reports WARN or PASS
-- `bsdlc run --story 1-1 --dry-run` -- expected: shows 5 steps including atdd
+- `bmpipe validate` -- expected: existing checks pass, new TEA check reports WARN or PASS
+- `bmpipe run --story 1-1 --dry-run` -- expected: shows 5 steps including atdd
 
 ## Suggested Review Order
 
@@ -133,7 +133,7 @@ The `bsdlc validate` TEA check uses `[WARN]` not `[FAIL]` because TEA is not str
 - TEA bootstrap helper called from init unless `--skip-tea`; mutually exclusive with `--tea-only`
   [`cli.py:240`](../../src/bmad_sdlc/cli.py#L240)
 
-- TEA readiness check in `bsdlc validate` — `[WARN]` not `[FAIL]`, uses `load_config` for path consistency
+- TEA readiness check in `bmpipe validate` — `[WARN]` not `[FAIL]`, uses `load_config` for path consistency
   [`cli.py:376`](../../src/bmad_sdlc/cli.py#L376)
 
 - New `setup-ci` subcommand wrapping `testarch-ci` skill with config-load error handling

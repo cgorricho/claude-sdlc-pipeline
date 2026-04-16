@@ -71,7 +71,7 @@ context:
 - Given `plugins: ["drizzle_drift_check"]` with entry point registered, when `load_plugins(config)` is called, then it returns a list containing a `DrizzleDriftCheck` instance
 - Given the orchestrator at the dev-story hook point, when plugins are loaded and return `CheckResult(passed=True)`, then pipeline continues to code-review unchanged
 - Given a plugin returning `CheckResult(passed=False)`, when the orchestrator runs it, then `fail_step` is called and pipeline exits with code 1
-- Given `bsdlc validate` with plugins listed, when run, then each plugin entry point resolution is checked and reported
+- Given `bmpipe validate` with plugins listed, when run, then each plugin entry point resolution is checked and reported
 - Given `pytest tests/test_plugins.py -v`, when run, then all tests pass
 
 ## Spec Change Log

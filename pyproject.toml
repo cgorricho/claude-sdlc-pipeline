@@ -15,7 +15,7 @@ drizzle = []
 dev = ["pytest>=8.0", "pytest-cov", "ruff"]
 
 [project.scripts]
-bsdlc = "bmad_sdlc.cli:main"
+bmpipe = "bmad_sdlc.cli:main"
 
 [project.entry-points."bmad_sdlc.plugins"]
 drizzle_drift_check = "bmad_sdlc.plugins.drizzle_drift:DrizzleDriftCheck"

@@ -1,4 +1,4 @@
-"""CLI entry point for bsdlc."""
+"""CLI entry point for bmpipe."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from bmad_sdlc import __version__
 _PIPELINE_STEPS = ["create-story", "atdd", "dev-story", "code-review", "trace"]
 
 # ---------------------------------------------------------------------------
-# Project type detection for `bsdlc init`
+# Project type detection for `bmpipe init`
 # ---------------------------------------------------------------------------
 
 _PROJECT_DEFAULTS = {
@@ -62,13 +62,13 @@ def _detect_project_type(directory: Path) -> str:
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="bsdlc")
+@click.version_option(version=__version__, prog_name="bmpipe")
 def main():
     """Automate your Claude Code SDLC — from story creation through code review and traceability."""
 
 
 # ---------------------------------------------------------------------------
-# bsdlc run
+# bmpipe run
 # ---------------------------------------------------------------------------
 
 
@@ -112,7 +112,7 @@ def run(story, skip_create, skip_atdd, skip_trace, review_mode, resume, resume_f
 
 
 # ---------------------------------------------------------------------------
-# bsdlc init
+# bmpipe init
 # ---------------------------------------------------------------------------
 
 
@@ -124,9 +124,9 @@ def run(story, skip_create, skip_atdd, skip_trace, review_mode, resume, resume_f
 @click.option("--tea-only", is_flag=True, default=False,
               help="Run only TEA bootstrap (skip config generation)")
 def init(non_interactive, skip_tea, tea_only):
-    """Generate .bsdlc/config.yaml for this project."""
+    """Generate .bmpipe/config.yaml for this project."""
     cwd = Path.cwd()
-    config_dir = cwd / ".bsdlc"
+    config_dir = cwd / ".bmpipe"
     config_path = config_dir / "config.yaml"
 
     if skip_tea and tea_only:
@@ -135,7 +135,7 @@ def init(non_interactive, skip_tea, tea_only):
     # --tea-only: skip config generation, jump to TEA bootstrap
     if tea_only:
         if not config_path.exists():
-            click.echo("ERROR: .bsdlc/config.yaml not found. Run 'bsdlc init' first.")
+            click.echo("ERROR: .bmpipe/config.yaml not found. Run 'bmpipe init' first.")
             raise SystemExit(1)
         _run_tea_bootstrap(cwd, config_path)
         return
@@ -219,7 +219,7 @@ def init(non_interactive, skip_tea, tea_only):
 
     # Append to .gitignore
     gitignore = cwd / ".gitignore"
-    gitignore_entry = ".bsdlc/runs/"
+    gitignore_entry = ".bmpipe/runs/"
     if gitignore.exists():
         content = gitignore.read_text()
         if gitignore_entry not in content:
@@ -299,7 +299,7 @@ def _run_tea_bootstrap(cwd: Path, config_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# bsdlc validate
+# bmpipe validate
 # ---------------------------------------------------------------------------
 
 
@@ -309,16 +309,16 @@ def validate():
     all_passed = True
 
     # Check 1: Config YAML parses and validates
-    config_path = Path.cwd() / ".bsdlc" / "config.yaml"
+    config_path = Path.cwd() / ".bmpipe" / "config.yaml"
     raw = None
     if not config_path.exists():
-        click.echo("[FAIL] Config file: .bsdlc/config.yaml not found")
+        click.echo("[FAIL] Config file: .bmpipe/config.yaml not found")
         all_passed = False
     else:
         try:
             from bmad_sdlc.config import load_config
             load_config(config_path)
-            click.echo("[PASS] Config file: .bsdlc/config.yaml parses and validates")
+            click.echo("[PASS] Config file: .bmpipe/config.yaml parses and validates")
         except Exception as e:
             click.echo(f"[FAIL] Config file: {e}")
             all_passed = False
@@ -392,7 +392,7 @@ def validate():
             missing.append("framework scaffold")
         if not has_test_design:
             missing.append("test design")
-        click.echo(f"[WARN] TEA: missing {', '.join(missing)}. Run: bsdlc init --tea-only")
+        click.echo(f"[WARN] TEA: missing {', '.join(missing)}. Run: bmpipe init --tea-only")
 
     # Summary
     if all_passed:
@@ -403,16 +403,16 @@ def validate():
 
 
 # ---------------------------------------------------------------------------
-# bsdlc setup-ci
+# bmpipe setup-ci
 # ---------------------------------------------------------------------------
 
 
 @main.command("setup-ci")
 def setup_ci():
     """Scaffold CI/CD pipeline configuration via TEA testarch-ci skill."""
-    config_path = Path.cwd() / ".bsdlc" / "config.yaml"
+    config_path = Path.cwd() / ".bmpipe" / "config.yaml"
     if not config_path.exists():
-        click.echo("ERROR: .bsdlc/config.yaml not found. Run 'bsdlc init' first.")
+        click.echo("ERROR: .bmpipe/config.yaml not found. Run 'bmpipe init' first.")
         raise SystemExit(1)
 
     from bmad_sdlc.config import load_config

@@ -24,7 +24,7 @@ Copy the existing files into `src/bmad_sdlc/` package layout, create `pyproject.
 - Create pyproject.toml with package metadata
 - Rename auto_story.py to orchestrator.py (filename only, no content changes)
 - Set up basic GitHub Actions CI (pytest + ruff)
-- Verify `pip install -e .` works and `bsdlc --help` prints (stub CLI is OK)
+- Verify `pip install -e .` works and `bmpipe --help` prints (stub CLI is OK)
 
 **Out of Scope:**
 - Refactoring hardcoded paths/commands (Stories 2, 4, 6)
@@ -115,7 +115,7 @@ bmad-sdlc/
 8. Create empty placeholder files: `src/bmad_sdlc/plugins.py`, `src/bmad_sdlc/plugins/__init__.py`, `tests/__init__.py`
 9. Add `LICENSE` file (MIT)
 10. Verify `pip install -e .` succeeds
-11. Verify `bsdlc --help` prints usage
+11. Verify `bmpipe --help` prints usage
 12. Verify `pytest` runs (tests may fail due to hardcoded paths — that is expected and OK for this story)
 13. Verify zero references to "who_else_is_here" or "whoelseishere" in any source file under `src/` (grep check)
 
@@ -129,7 +129,7 @@ bmad-sdlc/
 
 **AC-3**: All internal imports updated to use `bmad_sdlc.` package prefix — no bare `from config import`, `from contracts import`, etc.
 
-**AC-4**: `pip install -e .` succeeds and `bsdlc --help` prints usage
+**AC-4**: `pip install -e .` succeeds and `bmpipe --help` prints usage
 
 **AC-5**: `ruff check src/ tests/` passes (or only has pre-existing issues from the original code)
 
