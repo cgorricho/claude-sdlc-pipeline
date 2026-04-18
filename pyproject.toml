@@ -25,6 +25,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "bmad_sdlc.templates" = ["*.j2"]
+"bmad_sdlc.claude_skills" = ["**/*.md", "**/*.yaml", "**/*.sh", "**/*.py"]
 
 [tool.ruff]
 target-version = "py311"

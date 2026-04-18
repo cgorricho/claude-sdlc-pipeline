@@ -443,3 +443,64 @@ def setup_ci():
         sys.exit(exit_code)
     else:
         click.echo("CI scaffold complete.")
+
+
+# ---------------------------------------------------------------------------
+# bmpipe install-skills
+# ---------------------------------------------------------------------------
+
+
+@main.command("install-skills")
+@click.option("--target", type=click.Path(), default=None,
+              help="Target directory for skills (default: .claude/skills/)")
+@click.option("--force", is_flag=True, default=False,
+              help="Overwrite existing skill files")
+def install_skills(target, force):
+    """Install bundled Claude Code skills into the project."""
+    project_root = Path.cwd()
+    target_dir = Path(target) if target else project_root / ".claude" / "skills"
+
+    # Locate the bundled skills in the installed package
+    skills_pkg = importlib.resources.files("bmad_sdlc.claude_skills")
+
+    installed = []
+    for skill_dir in skills_pkg.iterdir():
+        if not skill_dir.is_dir() or skill_dir.name.startswith("_"):
+            continue
+
+        skill_name = f"bmpipe-{skill_dir.name}"
+        dest = target_dir / skill_name
+
+        if dest.exists() and not force:
+            click.echo(f"  SKIP {skill_name} (exists — use --force to overwrite)")
+            continue
+
+        # Copy recursively
+        dest.mkdir(parents=True, exist_ok=True)
+        _copy_skill_tree(skill_dir, dest)
+        installed.append(skill_name)
+        click.echo(f"  INSTALLED {skill_name} → {dest}")
+
+    if installed:
+        click.echo(f"\n{len(installed)} skill(s) installed to {target_dir}")
+        click.echo("Skills are ready to use via Claude Code slash commands.")
+    else:
+        click.echo("No new skills to install (all up to date).")
+
+
+def _copy_skill_tree(src, dest):
+    """Recursively copy a skill directory, preserving structure."""
+    for item in src.iterdir():
+        target = dest / item.name
+        if item.is_dir():
+            if item.name == "__pycache__":
+                continue
+            target.mkdir(parents=True, exist_ok=True)
+            _copy_skill_tree(item, target)
+        else:
+            if item.name.endswith(".pyc"):
+                continue
+            target.write_bytes(item.read_bytes())
+            # Make shell scripts executable
+            if item.name.endswith(".sh") or item.name.endswith(".py"):
+                target.chmod(0o755)
