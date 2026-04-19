@@ -269,3 +269,70 @@ These gaps inform the classification taxonomy and orchestrator behavior:
 | 8 | Migration safety heuristic insufficient | Story 1.3 | Solved: LLM classifies by change type |
 | 9 | Cross-story contamination | Story 1.3 | Partially addressed: per-story branches (open question) |
 | 10 | Config ownership model missing | Story 1.8 | Partially addressed: orchestrator detects overlap |
+
+---
+
+## Appendix A: Subagent Runtime Characteristics
+
+### Do subagents burn tokens while waiting for bmpipe?
+
+**No.** A subagent executes `bmpipe run` via the Bash tool. While the Bash process runs, the subagent is *blocked* on the tool call — not thinking, not generating, not consuming tokens. Tokens are consumed only when the subagent is actively reasoning: before issuing the command, after the command returns, and when formulating its report back to the orchestrator.
+
+bmpipe internally invokes Claude Code sessions for each workflow step (create-story, atdd, dev-story, code-review, trace) — those sessions consume tokens. But that's bmpipe's operational cost, not the subagent's idle cost. The subagent itself has zero token burn while waiting.
+
+### Do subagents need tmux sessions to exist?
+
+**No.** Subagents are Claude Code runtime constructs. They exist within Claude Code's internal process management, not as terminal processes. They don't need a shell, a tmux session, or a terminal pane. Background subagents run independently of the parent session's terminal.
+
+### Do subagents need tmux to run bmpipe?
+
+**No.** Subagents use the Bash tool directly:
+
+```bash
+bmpipe run --story 1-3 --stop-after review
+```
+
+This is a regular Bash tool call. bmpipe is a Python CLI that runs as a subprocess. No tmux needed. The subagent calls Bash, Bash runs bmpipe, bmpipe executes, returns output, subagent reads it and reports back to the orchestrator.
+
+### Infrastructure Summary
+
+| Component | Needed? | Why |
+|-----------|---------|-----|
+| tmux | **NO** | Subagents are Claude Code constructs, not terminal processes |
+| Sentinel files | **NO** | Subagents report back natively via tool results |
+| Polling/monitoring loop | **NO** | Claude Code notifies the orchestrator when subagents complete |
+| `helpers/tmux.sh` | **DEAD CODE** | Remove from the skill |
+| `.orchestrator/sentinels/` | **DEAD CODE** | Remove from the skill |
+| `helpers/state.py` | **YES** | Dependency graph parsing, CSV updates, sprint-status reading |
+| Bash tool | **YES** | How subagents invoke bmpipe |
+
+### Token Cost Model
+
+```
+Orchestrator skill (main session):
+  - Planning: ~2-5K tokens (read graph, plan tracks)
+  - Per-story classification: ~3-8K tokens (read findings, classify, decide)
+  - Per-story coordination: ~1-2K tokens (SendMessage for patches, trace)
+  - Final report: ~1-2K tokens
+  Total orchestrator cost: ~10-20K tokens per story
+
+Subagent (per story):
+  - Spawn + initial reasoning: ~1-2K tokens
+  - Report findings: ~2-4K tokens
+  - Apply patches (after SendMessage): ~2-5K tokens
+  - Report trace: ~1-2K tokens
+  - Idle time waiting for bmpipe: $0
+  Total subagent cost: ~6-13K tokens per story
+
+bmpipe (per story, inside subagent's Bash call):
+  - 5 Claude Code sessions (create, atdd, dev, review, trace)
+  - This is the bulk of the token cost
+  - Estimated: 50-200K tokens per story depending on complexity
+  Total bmpipe cost: dominates — 80-95% of total
+
+Total per story: ~66-233K tokens
+  - bmpipe workflows: 80-95%
+  - Orchestrator + subagent overhead: 5-20%
+```
+
+The orchestrator and subagent overhead is minimal relative to the workflow execution cost. TLCI-compliant: the orchestrator uses Tier 3 reasoning only for classification decisions; everything else is Tier 1 (Bash commands, file reads).
