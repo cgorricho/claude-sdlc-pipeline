@@ -102,6 +102,30 @@ class TestShouldRunStep:
         steps = ["create-story", "dev-story", "code-review", "trace"]
         assert should_run_step("atdd", "create-story", True, steps) is False
 
+    def test_stop_after_excludes_later_steps(self):
+        steps = _default_config().story.pipeline_steps
+        assert should_run_step("create-story", "create-story", False, steps, stop_after="dev-story") is True
+        assert should_run_step("atdd", "create-story", False, steps, stop_after="dev-story") is True
+        assert should_run_step("dev-story", "create-story", False, steps, stop_after="dev-story") is True
+        assert should_run_step("code-review", "create-story", False, steps, stop_after="dev-story") is False
+        assert should_run_step("trace", "create-story", False, steps, stop_after="dev-story") is False
+
+    def test_stop_after_last_step_runs_all(self):
+        steps = _default_config().story.pipeline_steps
+        for step in steps:
+            assert should_run_step(step, "create-story", False, steps, stop_after="trace") is True
+
+    def test_stop_after_first_step(self):
+        steps = _default_config().story.pipeline_steps
+        assert should_run_step("create-story", "create-story", False, steps, stop_after="create-story") is True
+        assert should_run_step("atdd", "create-story", False, steps, stop_after="create-story") is False
+
+    def test_stop_after_none_runs_all(self):
+        """No stop_after means all steps run (backward compat)."""
+        steps = _default_config().story.pipeline_steps
+        for step in steps:
+            assert should_run_step(step, "create-story", False, steps, stop_after=None) is True
+
 
 class TestParseReviewFindings:
     def test_no_findings_file(self, tmp_path):

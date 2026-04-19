@@ -9,11 +9,12 @@ Phase 2: Added status enum, schema validation, dual duration metrics,
 pause/resume timestamps, intervention classification, replace-on-resume.
 """
 
-import yaml
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+
+import yaml
 
 
 class StepStatus(str, Enum):
@@ -95,6 +96,7 @@ class RunLog:
     wall_clock_seconds: int = 0                     # Phase 2: started to completed
     total_duration_seconds: int = 0                 # Legacy: kept for backward compat
     human_interventions: HumanInterventions = field(default_factory=HumanInterventions)
+    stopped_after: str = ""                           # Step name when --stop-after was used
     prompt_sizes: dict = field(default_factory=dict)  # step → char count
     recovered: bool = False                         # Phase 2: True if reconstructed from partial state
 

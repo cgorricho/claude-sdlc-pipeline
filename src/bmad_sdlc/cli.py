@@ -86,6 +86,8 @@ def main():
               help="Resume from last paused/failed step")
 @click.option("--resume-from", type=click.Choice(_PIPELINE_STEPS, case_sensitive=True),
               default=None, help="Resume from a specific step")
+@click.option("--stop-after", type=click.Choice(_PIPELINE_STEPS, case_sensitive=True),
+              default=None, help="Stop pipeline after this step completes")
 @click.option("--dry-run", is_flag=True, default=False,
               help="Print what would run without executing")
 @click.option("--clean", is_flag=True, default=False,
@@ -93,8 +95,11 @@ def main():
 @click.option("-v", "--verbose", is_flag=True, default=False,
               help="Stream full Claude output to terminal in real time")
 def run(story, skip_create, skip_atdd, skip_trace, review_mode, resume, resume_from,
-        dry_run, clean, verbose):
+        stop_after, dry_run, clean, verbose):
     """Execute the full pipeline for a story."""
+    if stop_after and (resume or resume_from):
+        raise click.UsageError("--stop-after is mutually exclusive with --resume and --resume-from.")
+
     from bmad_sdlc.orchestrator import run_pipeline
 
     run_pipeline(
@@ -105,6 +110,7 @@ def run(story, skip_create, skip_atdd, skip_trace, review_mode, resume, resume_f
         resume=resume,
         resume_from=resume_from,
         review_mode=review_mode,
+        stop_after=stop_after,
         dry_run=dry_run,
         clean=clean,
         verbose=verbose,

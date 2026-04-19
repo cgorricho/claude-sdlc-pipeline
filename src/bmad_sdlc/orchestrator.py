@@ -74,6 +74,7 @@ def run_pipeline(
     resume: bool = False,
     resume_from: str | None = None,
     review_mode: str | None = None,
+    stop_after: str | None = None,
     dry_run: bool = False,
     clean: bool = False,
     verbose: bool = False,
@@ -190,18 +191,29 @@ def run_pipeline(
         print("\n=== DRY RUN ===")
         print(f"Story: {story_key}")
         print(f"Start from: {start_from}")
+        if stop_after:
+            print(f"Stop after: {stop_after}")
         print("Steps to run:")
         for step in pipeline_steps:
             skip = (step == "create-story" and skip_create) or \
                    (step == "atdd" and skip_atdd) or \
                    (step == "trace" and skip_trace)
-            will_run = should_run_step(step, start_from, skip, pipeline_steps)
-            marker = "  SKIP" if not will_run else "  RUN "
+            will_run = should_run_step(step, start_from, skip, pipeline_steps,
+                                       stop_after=stop_after)
+            if not will_run:
+                step_order = {s: i for i, s in enumerate(pipeline_steps)}
+                if (stop_after is not None
+                        and step_order.get(step, 0) > step_order.get(stop_after, len(pipeline_steps))):
+                    marker = "  STOP"
+                else:
+                    marker = "  SKIP"
+            else:
+                marker = "  RUN "
             print(f"  {marker}  {step}")
         sys.exit(0)
 
     # ── STEP 1: Create Story ──────────────────────────────────────
-    if should_run_step("create-story", start_from, skip_create, pipeline_steps):
+    if should_run_step("create-story", start_from, skip_create, pipeline_steps, stop_after=stop_after):
         status = read_sprint_status(sprint_status)
         current = get_story_status(status, story_key)
 
@@ -242,8 +254,11 @@ def run_pipeline(
             run_log.save(run_log_path)
             log.info(f"  create-story completed ✓ ({step_log.duration_seconds}s)")
 
+    if stop_after == "create-story":
+        _stop_after_exit(run_log, run_log_path, "create-story", story_key, log)
+
     # ── STEP 2: ATDD ─────────────────────────────────────────────
-    if should_run_step("atdd", start_from, skip_atdd, pipeline_steps):
+    if should_run_step("atdd", start_from, skip_atdd, pipeline_steps, stop_after=stop_after):
         story_file = find_story_file(story_key, impl_artifacts)
         if not story_file:
             log.error(f"No story file found matching {story_key}-*.md")
@@ -287,8 +302,11 @@ def run_pipeline(
         run_log.save(run_log_path)
         log.info(f"  atdd completed ✓ ({step_log.duration_seconds}s)")
 
+    if stop_after == "atdd":
+        _stop_after_exit(run_log, run_log_path, "atdd", story_key, log)
+
     # ── STEP 3: Dev Story + Verify ────────────────────────────────
-    if should_run_step("dev-story", start_from, False, pipeline_steps):
+    if should_run_step("dev-story", start_from, False, pipeline_steps, stop_after=stop_after):
         story_file = find_story_file(story_key, impl_artifacts)
         if not story_file:
             log.error(f"No story file found matching {story_key}-*.md")
@@ -378,8 +396,11 @@ def run_pipeline(
         run_log.save(run_log_path)
         log.info(f"  dev-story {step_log.status} ✓ ({step_log.duration_seconds}s)")
 
+    if stop_after == "dev-story":
+        _stop_after_exit(run_log, run_log_path, "dev-story", story_key, log)
+
     # ── STEP 3: Code Review (with retry + escalation) ─────────────
-    if should_run_step("code-review", start_from, False, pipeline_steps):
+    if should_run_step("code-review", start_from, False, pipeline_steps, stop_after=stop_after):
         story_file = find_story_file(story_key, impl_artifacts)
         if not story_file:
             log.error("No story file found")
@@ -851,8 +872,11 @@ def run_pipeline(
             log.error(f"Unexpected status after code-review: {story_stat}")
             sys.exit(1)
 
+    if stop_after == "code-review":
+        _stop_after_exit(run_log, run_log_path, "code-review", story_key, log)
+
     # ── STEP 4: Trace (optional) ──────────────────────────────────
-    if should_run_step("trace", start_from, skip_trace, pipeline_steps):
+    if should_run_step("trace", start_from, skip_trace, pipeline_steps, stop_after=stop_after):
         # Phase 2 (spec 4.5.2): Re-verify on resume before trace
         if resume or resume_from:
             log.info("  Re-verifying build+test before trace (resume path)...")
@@ -1007,12 +1031,20 @@ def setup_logging(run_dir: Path, verbose: bool = False, dry_run: bool = False):
         log.addHandler(file_handler)
 
 
-def should_run_step(step: str, start_from: str, skip: bool, pipeline_steps: list[str]) -> bool:
-    """Determine if a step should run based on resume point and skip flags."""
+def should_run_step(
+    step: str, start_from: str, skip: bool, pipeline_steps: list[str],
+    stop_after: str | None = None,
+) -> bool:
+    """Determine if a step should run based on resume point, skip flags, and stop_after."""
     if skip:
         return False
     step_order = {s: i for i, s in enumerate(pipeline_steps)}
-    return step_order.get(step, 0) >= step_order.get(start_from, 0)
+    idx = step_order.get(step, 0)
+    if idx < step_order.get(start_from, 0):
+        return False
+    if stop_after is not None and idx > step_order.get(stop_after, len(pipeline_steps)):
+        return False
+    return True
 
 
 def determine_resume_step(run_log: RunLog, pipeline_steps: list[str]) -> str:
@@ -1050,6 +1082,31 @@ def log_step_skip(run_log: RunLog, step: str, reason: str, config: Config):
     step_log.status = str(StepStatus.SKIPPED)
     step_log.state_after = reason
     run_log.replace_or_append_step(step_log)
+
+
+def _stop_after_exit(run_log: RunLog, run_log_path: Path, step: str, story_key: str, log):
+    """Save run log as stopped and exit after --stop-after step completes."""
+    run_log.status = "stopped"
+    run_log.stopped_after = step
+    run_log.completed = now_iso()
+    run_log.execution_time_seconds = run_log.compute_execution_time()
+    run_log.wall_clock_seconds = run_log.compute_wall_clock()
+    run_log.total_duration_seconds = run_log.execution_time_seconds
+    run_log.save(run_log_path)
+    log.info(f"\nPipeline stopped after '{step}' (--stop-after)")
+    log.info(f"  Resume: bmpipe run --story {story_key} --resume-from "
+             f"{_next_step_name(step, run_log)}")
+    sys.exit(0)
+
+
+def _next_step_name(step: str, run_log: RunLog) -> str:
+    """Return the name of the step after the given one."""
+    pipeline = ["create-story", "atdd", "dev-story", "code-review", "trace"]
+    try:
+        idx = pipeline.index(step)
+        return pipeline[idx + 1] if idx + 1 < len(pipeline) else step
+    except ValueError:
+        return step
 
 
 def fail_step(run_log: RunLog, step_log: StepLog, run_log_path: Path, error: str):

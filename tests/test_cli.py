@@ -39,6 +39,7 @@ class TestHelpOutput:
         assert "--skip-trace" in result.output
         assert "--resume" in result.output
         assert "--resume-from" in result.output
+        assert "--stop-after" in result.output
         assert "--review-mode" in result.output
         assert "--dry-run" in result.output
         assert "--clean" in result.output
@@ -91,6 +92,7 @@ class TestRun:
                 resume=False,
                 resume_from=None,
                 review_mode=None,
+                stop_after=None,
                 dry_run=True,
                 clean=False,
                 verbose=True,
@@ -113,6 +115,7 @@ class TestRun:
                 resume=False,
                 resume_from="code-review",
                 review_mode="B",
+                stop_after=None,
                 dry_run=True,
                 clean=True,
                 verbose=True,
@@ -129,6 +132,7 @@ class TestRun:
                 resume=False,
                 resume_from=None,
                 review_mode=None,
+                stop_after=None,
                 dry_run=False,
                 clean=False,
                 verbose=False,
@@ -373,6 +377,40 @@ class TestRunSkipAtdd:
             ])
             mock_pipeline.assert_called_once()
             assert mock_pipeline.call_args[1]["resume_from"] == "atdd"
+
+
+# ---------------------------------------------------------------------------
+# bmpipe run --stop-after
+# ---------------------------------------------------------------------------
+
+
+class TestRunStopAfter:
+    def test_stop_after_passed_to_pipeline(self, runner):
+        with patch("bmad_sdlc.orchestrator.run_pipeline") as mock_pipeline:
+            result = runner.invoke(main, [
+                "run", "--story", "1-3", "--stop-after", "code-review",
+            ])
+            mock_pipeline.assert_called_once()
+            assert mock_pipeline.call_args[1]["stop_after"] == "code-review"
+
+    def test_stop_after_invalid_step(self, runner):
+        result = runner.invoke(main, ["run", "--story", "1-1", "--stop-after", "bogus"])
+        assert result.exit_code != 0
+
+    def test_stop_after_mutually_exclusive_with_resume(self, runner):
+        result = runner.invoke(main, [
+            "run", "--story", "1-1", "--stop-after", "dev-story", "--resume",
+        ])
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output.lower() or "Usage" in result.output
+
+    def test_stop_after_mutually_exclusive_with_resume_from(self, runner):
+        result = runner.invoke(main, [
+            "run", "--story", "1-1",
+            "--stop-after", "dev-story", "--resume-from", "code-review",
+        ])
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output.lower() or "Usage" in result.output
 
 
 # ---------------------------------------------------------------------------
