@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bmad_sdlc.contracts import (
     count_acceptance_criteria,
+    parse_review_findings_json,
     validate_atdd,
     validate_create_story,
     validate_dev_story,
@@ -330,3 +331,192 @@ class TestContractResultWarnings:
     def test_warnings_field(self):
         result = ContractResult(passed=True, warnings=["test warning"])
         assert result.warnings == ["test warning"]
+
+
+class TestParseReviewFindingsJson:
+    """Story A-2: Structured review findings JSON output."""
+
+    def test_zero_findings(self):
+        """AC A2-6: Zero findings produces valid schema with empty array."""
+        findings = {"fix": [], "design": [], "note": []}
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        assert result["story_key"] == "1-3"
+        assert result["review_model"] == "sonnet"
+        assert result["review_mode"] == "A"
+        assert result["total_findings"] == 0
+        assert result["findings"] == []
+        assert result["summary"] == {
+            "fix": 0, "security": 0, "test_fix": 0,
+            "defer": 0, "spec_amend": 0, "design": 0,
+        }
+        assert "parse_errors" not in result
+
+    def test_fix_and_design_findings(self):
+        """AC A2-2: JSON schema matches Section 3.4 format."""
+        findings = {
+            "fix": [
+                {"summary": "Missing validation in `src/auth.ts:42`", "files_affected": ["src/auth.ts"]},
+                {"summary": "Off-by-one error", "files_affected": ["src/utils.ts"]},
+            ],
+            "design": [
+                {"summary": "Refactor needed for `src/core.ts`", "files_affected": ["src/core.ts"]},
+            ],
+            "note": [],
+        }
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        assert result["total_findings"] == 3
+        assert result["summary"]["fix"] == 2
+        assert result["summary"]["design"] == 1
+
+        # Check finding structure
+        fix1 = result["findings"][0]
+        assert fix1["id"] == 1
+        assert fix1["category"] == "[FIX]"
+        assert fix1["auto_fixable"] is True
+        assert fix1["severity"] == "medium"
+
+        design1 = result["findings"][2]
+        assert design1["category"] == "[DESIGN]"
+        assert design1["auto_fixable"] is False
+
+    def test_file_and_line_extraction(self):
+        """AC A2-4: File path and line number extracted from backtick refs."""
+        findings = {
+            "fix": [{"summary": "Bug in `src/foo.ts:42` causes crash", "files_affected": []}],
+            "design": [],
+            "note": [],
+        }
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        f = result["findings"][0]
+        assert f["file"] == "src/foo.ts"
+        assert f["line"] == 42
+
+    def test_file_without_line(self):
+        """File ref without line number produces null line."""
+        findings = {
+            "fix": [{"summary": "Issue in `src/bar.ts`", "files_affected": []}],
+            "design": [],
+            "note": [],
+        }
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        f = result["findings"][0]
+        assert f["file"] == "src/bar.ts"
+        assert f["line"] is None
+
+    def test_file_from_files_affected_fallback(self):
+        """When summary has no file ref, uses first files_affected entry."""
+        findings = {
+            "fix": [{"summary": "Missing import", "files_affected": ["src/index.ts"]}],
+            "design": [],
+            "note": [],
+        }
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        assert result["findings"][0]["file"] == "src/index.ts"
+
+    def test_no_file_ref(self):
+        """No file references at all → null file and line."""
+        findings = {
+            "fix": [{"summary": "Generic issue", "files_affected": []}],
+            "design": [],
+            "note": [],
+        }
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        assert result["findings"][0]["file"] is None
+        assert result["findings"][0]["line"] is None
+
+    def test_summary_counts_match_findings(self):
+        """AC A2-5: Summary counts computed from findings array."""
+        findings = {
+            "fix": [
+                {"summary": "Fix 1", "files_affected": []},
+                {"summary": "Fix 2", "files_affected": []},
+            ],
+            "design": [{"summary": "Design 1", "files_affected": []}],
+            "note": [],
+        }
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        assert result["summary"]["fix"] == 2
+        assert result["summary"]["design"] == 1
+        assert result["total_findings"] == 3
+
+    def test_all_six_category_keys_present(self):
+        """Forward-compat: all 6 summary keys present even with only fix/design."""
+        findings = {"fix": [], "design": [], "note": []}
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        expected_keys = {"fix", "security", "test_fix", "defer", "spec_amend", "design"}
+        assert set(result["summary"].keys()) == expected_keys
+
+    def test_note_findings_excluded_from_summary(self):
+        """[NOTE] findings are not in the 6-category summary (no summary key for note)."""
+        findings = {
+            "fix": [],
+            "design": [],
+            "note": [{"summary": "Minor nit", "files_affected": []}],
+        }
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        # note items appear in findings array but not in summary counts
+        assert result["total_findings"] == 1
+        assert result["findings"][0]["category"] == "[NOTE]"
+        # summary only has the 6 categories, no "note" key
+        assert "note" not in result["summary"]
+
+    def test_mode_b_metadata(self):
+        """Review mode B metadata preserved."""
+        findings = {"fix": [], "design": [], "note": []}
+        result = parse_review_findings_json("2-1", findings, "gpt-4", "B")
+        assert result["review_mode"] == "B"
+        assert result["review_model"] == "gpt-4"
+
+    def test_malformed_finding_produces_parse_errors(self):
+        """AC A2-7: Malformed finding produces parse_errors field."""
+        # Simulate a finding item that will raise during processing
+        # by providing an item without a 'summary' key that causes .get to
+        # work but with a type that breaks .split()
+        class BadSummary:
+            """Object that raises on split() to simulate malformed data."""
+            def split(self, *a):
+                raise TypeError("cannot split")
+            def __getitem__(self, key):
+                raise TypeError("cannot index")
+
+        findings = {
+            "fix": [{"summary": BadSummary(), "files_affected": []}],
+            "design": [],
+            "note": [],
+        }
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A", raw_output="raw review text here")
+        assert "parse_errors" in result
+        assert len(result["parse_errors"]) == 1
+        assert "fix" in result["parse_errors"][0]
+        assert result["raw_output"] == "raw review text here"
+        # The malformed finding should not appear in the findings array
+        assert result["total_findings"] == 0
+
+    def test_parse_errors_without_raw_output(self):
+        """parse_errors present but no raw_output when raw_output is empty."""
+        class BadSummary:
+            def split(self, *a):
+                raise TypeError("cannot split")
+            def __getitem__(self, key):
+                raise TypeError("cannot index")
+
+        findings = {
+            "fix": [{"summary": BadSummary(), "files_affected": []}],
+            "design": [],
+            "note": [],
+        }
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        assert "parse_errors" in result
+        assert "raw_output" not in result  # raw_output="" → not included
+
+    def test_title_truncation(self):
+        """Long summaries are truncated in the title field."""
+        long_summary = "x" * 200
+        findings = {
+            "fix": [{"summary": long_summary, "files_affected": []}],
+            "design": [],
+            "note": [],
+        }
+        result = parse_review_findings_json("1-3", findings, "sonnet", "A")
+        assert len(result["findings"][0]["title"]) <= 120
+        assert result["findings"][0]["description"] == long_summary

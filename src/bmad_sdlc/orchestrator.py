@@ -36,6 +36,7 @@ from bmad_sdlc.config import Config, get_config
 from bmad_sdlc.contracts import (
     check_dev_story_status_gap,
     find_story_file,
+    parse_review_findings_json,
     validate_atdd,
     validate_create_story,
     validate_dev_story,
@@ -485,6 +486,7 @@ def run_pipeline(
                     sys.exit(3)
 
                 # Zero actionable findings — manual review passed clean
+                _write_review_findings_json(run_dir, story_key, findings, run_log)
                 step_log.status = str(StepStatus.COMPLETED)
                 step_log.state_after = "review"
                 step_log.duration_seconds = elapsed_since(step_log.started)
@@ -648,6 +650,7 @@ def run_pipeline(
                             sys.exit(3)
 
                     # Zero findings — code review passed clean
+                    _write_review_findings_json(run_dir, story_key, findings, run_log)
                     step_log.status = str(StepStatus.COMPLETED)
                     step_log.state_after = "review"
                     step_log.duration_seconds = elapsed_since(step_log.started)
@@ -809,6 +812,7 @@ def run_pipeline(
             story_stat = get_story_status(status, story_key)
 
             if story_stat == "done":
+                _write_review_findings_json(run_dir, story_key, findings, run_log)
                 step_log.status = str(StepStatus.COMPLETED)
                 step_log.state_after = "done"
                 step_log.duration_seconds = elapsed_since(step_log.started)
@@ -856,6 +860,7 @@ def run_pipeline(
 
             if story_stat == "review":
                 # Review completed but didn't change status — treat as pass
+                _write_review_findings_json(run_dir, story_key, findings, run_log)
                 step_log.status = str(StepStatus.COMPLETED)
                 step_log.state_after = "review"
                 step_log.duration_seconds = elapsed_since(step_log.started)
@@ -1112,6 +1117,24 @@ def _next_step_name(step: str, pipeline_steps: list[str]) -> str:
         return pipeline_steps[idx + 1] if idx + 1 < len(pipeline_steps) else step
     except ValueError:
         return step
+
+
+def _write_review_findings_json(
+    run_dir: Path, story_key: str, findings: dict, run_log: RunLog,
+    raw_output: str = "",
+):
+    """Write structured review-findings.json to run_dir after code-review."""
+    log = logging.getLogger("bmad_sdlc.orchestrator")
+    structured = parse_review_findings_json(
+        story_key=story_key,
+        findings=findings,
+        review_model=run_log.review_model,
+        review_mode=run_log.review_mode,
+        raw_output=raw_output,
+    )
+    findings_path = run_dir / "review-findings.json"
+    findings_path.write_text(json.dumps(structured, indent=2) + "\n")
+    log.info(f"  Review findings JSON: {findings_path} ({structured['total_findings']} findings)")
 
 
 def fail_step(run_log: RunLog, step_log: StepLog, run_log_path: Path, error: str):

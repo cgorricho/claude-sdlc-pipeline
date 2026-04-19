@@ -228,6 +228,131 @@ def validate_trace(report_path: Path) -> ContractResult:
     return ContractResult(passed=True)
 
 
+# ── Category constants for structured findings ──────────────────
+
+_AUTO_FIXABLE_CATEGORIES = {"[FIX]", "[SECURITY]", "[TEST-FIX]"}
+_ESCALATION_CATEGORIES = {"[DESIGN]", "[SPEC-AMEND]", "[DEFER]"}
+_ALL_CATEGORIES = _AUTO_FIXABLE_CATEGORIES | _ESCALATION_CATEGORIES
+
+# Map from findings dict key → JSON category tag
+_KEY_TO_CATEGORY = {
+    "fix": "[FIX]",
+    "design": "[DESIGN]",
+    "note": "[NOTE]",
+    "security": "[SECURITY]",
+    "test_fix": "[TEST-FIX]",
+    "defer": "[DEFER]",
+    "spec_amend": "[SPEC-AMEND]",
+}
+
+# Map from category tag → summary key
+_CATEGORY_TO_SUMMARY_KEY = {
+    "[FIX]": "fix",
+    "[SECURITY]": "security",
+    "[TEST-FIX]": "test_fix",
+    "[DEFER]": "defer",
+    "[SPEC-AMEND]": "spec_amend",
+    "[DESIGN]": "design",
+}
+
+
+def _extract_file_and_line(text: str) -> tuple[str | None, int | None]:
+    """Extract first file path and optional line number from finding text.
+
+    Looks for backtick-quoted paths like `src/foo.ts:42` or `src/foo.ts`,
+    and also bare path references like — /path/to/file.ts:42.
+    """
+    # Backtick-quoted: `path/file.ext:line` or `path/file.ext`
+    m = re.search(r"`([^`]+\.\w+)(?::(\d+))?`", text)
+    if m:
+        return m.group(1), int(m.group(2)) if m.group(2) else None
+
+    # Bare path with line: — /path/file.ext:line
+    m = re.search(r"(?:^|\s)(/[^\s:]+\.\w+)(?::(\d+))?", text)
+    if m:
+        return m.group(1), int(m.group(2)) if m.group(2) else None
+
+    return None, None
+
+
+def parse_review_findings_json(
+    story_key: str,
+    findings: dict,
+    review_model: str,
+    review_mode: str,
+    raw_output: str = "",
+) -> dict:
+    """Convert findings dict into structured JSON matching Epic A Section 3.4 schema.
+
+    Args:
+        story_key: Story identifier (e.g. "1-3")
+        findings: Dict from parse_review_findings() with keys fix/design/note
+        review_model: Model used for review (e.g. "sonnet")
+        review_mode: Review mode ("A" or "B")
+        raw_output: Raw review stdout for malformed output preservation
+
+    Returns:
+        Dict matching the Section 3.4 JSON schema.
+    """
+    structured_findings = []
+    parse_errors = []
+    finding_id = 0
+
+    for key, category in _KEY_TO_CATEGORY.items():
+        for item in findings.get(key, []):
+            try:
+                summary = item.get("summary", "")
+                files_affected = item.get("files_affected", [])
+
+                # Build full text for file/line extraction
+                full_text = summary
+                if files_affected:
+                    full_text += " " + " ".join(f"`{f}`" for f in files_affected)
+
+                file_path, line_num = _extract_file_and_line(full_text)
+
+                # If no file from text but files_affected has entries, use first
+                if file_path is None and files_affected:
+                    file_path = files_affected[0]
+
+                finding_id += 1
+                structured_findings.append({
+                    "id": finding_id,
+                    "category": category,
+                    "title": summary.split("\n")[0][:120] if summary else f"Finding {finding_id}",
+                    "description": summary,
+                    "file": file_path,
+                    "line": line_num,
+                    "severity": "medium",
+                    "auto_fixable": category in _AUTO_FIXABLE_CATEGORIES,
+                })
+            except Exception as e:
+                parse_errors.append(f"Finding in '{key}': {e}")
+
+    # Compute summary counts from the structured findings
+    summary = {k: 0 for k in _CATEGORY_TO_SUMMARY_KEY.values()}
+    for f in structured_findings:
+        sk = _CATEGORY_TO_SUMMARY_KEY.get(f["category"])
+        if sk:
+            summary[sk] += 1
+
+    result = {
+        "story_key": story_key,
+        "review_model": review_model,
+        "review_mode": review_mode,
+        "total_findings": len(structured_findings),
+        "findings": structured_findings,
+        "summary": summary,
+    }
+
+    if parse_errors:
+        result["parse_errors"] = parse_errors
+        if raw_output:
+            result["raw_output"] = raw_output
+
+    return result
+
+
 def assert_iso_timestamp(ts: str, field_name: str = "timestamp"):
     """Assert a timestamp is valid ISO 8601. Raises ValueError if not.
 

@@ -20,6 +20,7 @@ from bmad_sdlc.orchestrator import (
     apply_safety_heuristic,
     generate_escalation_doc,
     _scoped_clean,
+    _write_review_findings_json,
 )
 from bmad_sdlc.run_log import RunLog, StepLog, StepStatus
 
@@ -328,6 +329,63 @@ class TestScopedClean:
         calls = mock_sp.run.call_args_list
         assert len(calls) == 2
         assert "stash" in calls[1][0][0]
+
+
+class TestWriteReviewFindingsJson:
+    """Story A-2: Structured review findings JSON output."""
+
+    def test_writes_json_file(self, tmp_path):
+        """JSON file written to run_dir with correct name."""
+        run_log = RunLog(story="1-3", started="2026-04-19T10:00:00",
+                         review_model="sonnet", review_mode="A")
+        findings = {"fix": [], "design": [], "note": []}
+        _write_review_findings_json(tmp_path, "1-3", findings, run_log)
+        json_path = tmp_path / "review-findings.json"
+        assert json_path.exists()
+
+    def test_json_schema(self, tmp_path):
+        """Written JSON matches Section 3.4 schema."""
+        import json
+        run_log = RunLog(story="1-3", started="2026-04-19T10:00:00",
+                         review_model="sonnet", review_mode="A")
+        findings = {
+            "fix": [{"summary": "Bug in `src/app.ts:10`", "files_affected": ["src/app.ts"]}],
+            "design": [{"summary": "Refactor needed", "files_affected": ["src/core.ts"]}],
+            "note": [],
+        }
+        _write_review_findings_json(tmp_path, "1-3", findings, run_log)
+        data = json.loads((tmp_path / "review-findings.json").read_text())
+        assert data["story_key"] == "1-3"
+        assert data["review_model"] == "sonnet"
+        assert data["review_mode"] == "A"
+        assert data["total_findings"] == 2
+        assert len(data["findings"]) == 2
+        assert data["summary"]["fix"] == 1
+        assert data["summary"]["design"] == 1
+        # All 6 summary keys present
+        assert set(data["summary"].keys()) == {"fix", "security", "test_fix", "defer", "spec_amend", "design"}
+
+    def test_zero_findings_json(self, tmp_path):
+        """AC A2-6: Zero findings still writes JSON with empty array."""
+        import json
+        run_log = RunLog(story="2-1", started="2026-04-19T10:00:00",
+                         review_model="sonnet", review_mode="B")
+        findings = {"fix": [], "design": [], "note": []}
+        _write_review_findings_json(tmp_path, "2-1", findings, run_log)
+        data = json.loads((tmp_path / "review-findings.json").read_text())
+        assert data["total_findings"] == 0
+        assert data["findings"] == []
+
+    def test_mode_b_metadata(self, tmp_path):
+        """Review mode and model from run_log are passed through."""
+        import json
+        run_log = RunLog(story="1-3", started="2026-04-19T10:00:00",
+                         review_model="gpt-4", review_mode="B")
+        findings = {"fix": [], "design": [], "note": []}
+        _write_review_findings_json(tmp_path, "1-3", findings, run_log)
+        data = json.loads((tmp_path / "review-findings.json").read_text())
+        assert data["review_model"] == "gpt-4"
+        assert data["review_mode"] == "B"
 
 
 class TestDryRunMode:
