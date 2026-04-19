@@ -214,6 +214,29 @@ The orchestrator and subagent overhead is minimal relative to workflow execution
 - The skill's persona, boundaries, and philosophy from the current `SKILL.md` are preserved (TLCI, never modify BMAD workflows, single CSV writer, etc.)
 - Phase 2 scope limits from the current workflow are updated: "one story per subagent" replaces "one story per tmux session"
 
+**BMAD Version Compatibility & Knowledge Sources:**
+
+The orchestrator must work across different BMAD versions installed in target projects. It should detect what's available and adapt:
+
+1. **If `_bmad/_config/bmad-help.csv` exists** (BMAD 6.2+) → read it for full phase/dependency/completion awareness. This is the richest knowledge source — 70 rows, 16 columns covering all skills, phases, dependencies, required gates, output patterns, and module documentation URLs.
+2. **If no `bmad-help.csv` but manifests exist** (`workflow-manifest.csv`, `task-manifest.csv`, `agent-manifest.csv` — BMAD 6.0.x) → degrade gracefully to manifest-based routing. Less rich (no phase ordering, no dependency tracking, no completion detection) but functional.
+3. **If nothing exists** → HALT and tell the human "BMAD installation not detected or incompatible with automated orchestration."
+
+Known BMAD versions in the field:
+- Atlas (6.2.0): has both `bmad-master.md` AND `bmad-help.csv` (transitional)
+- bmad-sdlc (6.3.1-next.4): has `bmad-help.csv`, NO bmad-master (fully migrated)
+- who_else_is_here (6.0.1): has `bmad-master.md`, NO bmad-help.csv (legacy)
+
+**BMAD-Fluent Communication Calibration (NOT a persona):**
+
+The orchestrator should NOT embed the bmad-master persona. Instead, the SKILL.md should include explicit communication calibration instructions:
+- "When a BMAD workflow asks for standard confirmation (proceed with review, confirm plan, etc.), confirm immediately without elaboration"
+- "When a workflow produces options (1, 2, 3), select based on story spec context — do not invent new options"
+- "When a workflow HALTs for human judgment, surface the exact question to the orchestrator — do not attempt to answer on the subagent's behalf"
+- "Do not second-guess, modify, or add conditions to standard BMAD workflow prompts"
+
+This gives the orchestrator the BMad Master's practical effectiveness (concise, decisive, BMAD-aware) without freezing a persona that will drift as BMAD evolves. The knowledge comes from runtime CSV/manifest reading, not from embedded understanding.
+
 ---
 
 ### Story B-2: Dependency Graph Generation
