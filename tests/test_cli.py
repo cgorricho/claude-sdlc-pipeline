@@ -328,6 +328,28 @@ class TestValidate:
             assert "[WARN] TEA:" in result.output
             assert "bmpipe init --tea-only" in result.output
 
+    def test_validate_plugins_check(self, runner, tmp_path):
+        """Check 4 loads configured plugins via entry points and reports pass/fail per plugin (AC 5-5)."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            config_dir = Path(".bmpipe")
+            config_dir.mkdir()
+            (config_dir / "config.yaml").write_text(
+                "project:\n  root: .\n  name: test\n"
+                "claude:\n  bin: echo\n"
+                "build:\n  command: echo hello\n"
+                "plugins:\n"
+                "  - drizzle_drift_check\n"
+                "  - nonexistent_plugin_xyz\n"
+            )
+
+            result = runner.invoke(main, ["validate"])
+            # Registered entry point resolves and loads
+            assert "[PASS] Plugin: 'drizzle_drift_check'" in result.output
+            # Unregistered name is reported as a failure
+            assert "[FAIL] Plugin: 'nonexistent_plugin_xyz'" in result.output
+            # One failure => overall exit 1
+            assert result.exit_code == 1
+
 
 # ---------------------------------------------------------------------------
 # bmpipe run --skip-atdd
@@ -375,6 +397,25 @@ class TestInitTea:
             result = runner.invoke(main, ["init", "--tea-only"])
             assert result.exit_code == 1
             assert "config.yaml not found" in result.output
+
+    def test_init_default_launches_tea_sessions(self, runner, tmp_path):
+        """Default `bmpipe init --non-interactive` (no --skip-tea) calls _run_tea_bootstrap,
+        which invokes run_workflow for both TEA framework scaffold and test design (AC T-5)."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            Path("pyproject.toml").write_text("[project]\nname = 'test'\n")
+
+            with patch("bmad_sdlc.runner.run_workflow", return_value=(0, "")) as mock_run_wf:
+                result = runner.invoke(main, ["init", "--non-interactive"])
+
+            assert result.exit_code == 0
+            assert "Created" in result.output
+            # _run_tea_bootstrap executed both TEA sessions
+            assert mock_run_wf.call_count == 2
+            step_labels = [call.args[0] for call in mock_run_wf.call_args_list]
+            assert step_labels == ["tea-framework", "tea-test-design"]
+            assert "Running TEA framework scaffold" in result.output
+            assert "Running TEA test design" in result.output
+            assert "TEA bootstrap complete." in result.output
 
 
 # ---------------------------------------------------------------------------
