@@ -192,6 +192,44 @@ class TestSchemaValidation:
         assert any("invalid attempt" in e for e in errors)
 
 
+class TestSixCategoryFindings:
+    """Story A-4: 6-category findings in step_log round-trip."""
+
+    def test_six_category_findings_round_trip(self, tmp_path):
+        """StepLog with 6-category findings dict saves and loads correctly."""
+        path = tmp_path / "run_log.yaml"
+
+        rl = RunLog(story="2-1", started="2026-04-19T10:00:00")
+        step = StepLog(
+            step="code-review",
+            mode={"mode": "autonomous", "type": "review"},
+            status=str(StepStatus.COMPLETED),
+            started="2026-04-19T10:00:00",
+            attempt=1,
+            findings={
+                "total": 12,
+                "fix": 3,
+                "security": 2,
+                "test_fix": 4,
+                "defer": 1,
+                "spec_amend": 1,
+                "design": 1,
+            },
+        )
+        rl.replace_or_append_step(step)
+        rl.save(path)
+
+        loaded = RunLog.load(path)
+        loaded_findings = loaded.steps[0].findings
+        assert loaded_findings["total"] == 12
+        assert loaded_findings["fix"] == 3
+        assert loaded_findings["security"] == 2
+        assert loaded_findings["test_fix"] == 4
+        assert loaded_findings["defer"] == 1
+        assert loaded_findings["spec_amend"] == 1
+        assert loaded_findings["design"] == 1
+
+
 class TestNormalizeTimestamp:
     def test_proper_iso_unchanged(self):
         assert _normalize_timestamp("2026-03-25T10:00:00") == "2026-03-25T10:00:00"

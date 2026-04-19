@@ -452,24 +452,42 @@ def run_pipeline(
                 # Consume human-produced findings file
                 findings = parse_review_findings(story_key, impl_artifacts)
                 fix_count = len(findings.get("fix", []))
+                security_count = len(findings.get("security", []))
+                test_fix_count = len(findings.get("test_fix", []))
+                defer_count = len(findings.get("defer", []))
+                spec_amend_count = len(findings.get("spec_amend", []))
                 design_count = len(findings.get("design", []))
                 note_count = len(findings.get("note", []))
-                log.info(f"  Human findings: {fix_count} [FIX], {design_count} [DESIGN], {note_count} [NOTE]")
+                log.info(
+                    f"  Human findings: {fix_count} [FIX], {security_count} [SECURITY], "
+                    f"{test_fix_count} [TEST-FIX], {defer_count} [DEFER], "
+                    f"{spec_amend_count} [SPEC-AMEND], {design_count} [DESIGN], {note_count} [NOTE]"
+                )
 
                 step_log.findings = {
-                    "total": fix_count + design_count + note_count,
+                    "total": (fix_count + security_count + test_fix_count
+                              + defer_count + spec_amend_count + design_count + note_count),
                     "fix": fix_count,
+                    "security": security_count,
+                    "test_fix": test_fix_count,
+                    "defer": defer_count,
+                    "spec_amend": spec_amend_count,
                     "design": design_count,
                     "note": note_count,
                     "source": "manual-fallback",
                 }
 
-                if design_count > 0 or fix_count > 0:
+                escalation_count = design_count + spec_amend_count
+                auto_apply_count = fix_count + security_count + test_fix_count
+
+                if escalation_count > 0 or auto_apply_count > 0:
                     escalation_path = run_dir / "escalation.md"
                     generate_escalation_doc(escalation_path, story_key, findings, run_dir)
                     step_log.status = str(StepStatus.PAUSED)
                     step_log.paused_at = now_iso()
-                    all_findings = findings.get("design", []) + findings.get("fix", [])
+                    all_findings = (findings.get("design", []) + findings.get("spec_amend", [])
+                                    + findings.get("fix", []) + findings.get("security", [])
+                                    + findings.get("test_fix", []))
                     step_log.escalation = {
                         "findings": all_findings,
                         "escalation_doc": str(escalation_path),
@@ -477,7 +495,12 @@ def run_pipeline(
                     }
                     run_log.replace_or_append_step(step_log)
                     run_log.status = "paused"
-                    reason = f"{fix_count} [FIX] + {design_count} [DESIGN] from manual review"
+                    reason_parts = []
+                    if auto_apply_count > 0:
+                        reason_parts.append(f"{auto_apply_count} auto-apply")
+                    if escalation_count > 0:
+                        reason_parts.append(f"{escalation_count} escalation")
+                    reason = f"{' + '.join(reason_parts)} finding(s) from manual review"
                     run_log.human_interventions.add_planned(reason=reason, step="code-review")
                     run_log.save(run_log_path)
                     log.info(f"\n{'='*60}")
@@ -540,36 +563,59 @@ def run_pipeline(
                     codex_failure_reason = f"Codex invocation error: {e}"
 
                 if not codex_failed:
-                    # Codex succeeded — parse findings and check for NOTE-only output
+                    # Codex succeeded — parse findings with 6-category taxonomy
                     log.info("  Codex review completed — processing findings")
                     findings = parse_review_findings(story_key, impl_artifacts)
                     fix_count = len(findings.get("fix", []))
+                    security_count = len(findings.get("security", []))
+                    test_fix_count = len(findings.get("test_fix", []))
+                    defer_count = len(findings.get("defer", []))
+                    spec_amend_count = len(findings.get("spec_amend", []))
                     design_count = len(findings.get("design", []))
                     note_count = len(findings.get("note", []))
-                    log.info(f"  Findings: {fix_count} [FIX], {design_count} [DESIGN], {note_count} [NOTE]")
+                    log.info(
+                        f"  Findings: {fix_count} [FIX], {security_count} [SECURITY], "
+                        f"{test_fix_count} [TEST-FIX], {defer_count} [DEFER], "
+                        f"{spec_amend_count} [SPEC-AMEND], {design_count} [DESIGN], {note_count} [NOTE]"
+                    )
 
                     step_log.findings = {
-                        "total": fix_count + design_count + note_count,
+                        "total": (fix_count + security_count + test_fix_count
+                                  + defer_count + spec_amend_count + design_count + note_count),
                         "fix": fix_count,
+                        "security": security_count,
+                        "test_fix": test_fix_count,
+                        "defer": defer_count,
+                        "spec_amend": spec_amend_count,
                         "design": design_count,
                         "note": note_count,
                         "source": "codex",
                     }
 
-                    # Apply safety heuristic (AD-8)
+                    # Apply safety heuristic (AD-8) — only [FIX] is reclassified
                     reclassified = apply_safety_heuristic(findings, config)
                     if reclassified > 0:
                         design_count = len(findings.get("design", []))
                         fix_count = len(findings.get("fix", []))
                         log.warning(f"  Safety heuristic: {reclassified} [FIX] reclassified as [DESIGN]")
+                        step_log.findings["fix"] = fix_count
+                        step_log.findings["design"] = design_count
 
-                    # [DESIGN] or [FIX] items → escalate (Codex is read-only, can't apply fixes)
-                    if design_count > 0 or fix_count > 0:
+                    auto_apply_count = fix_count + security_count + test_fix_count
+                    escalation_count = design_count + spec_amend_count
+
+                    if defer_count > 0:
+                        log.info(f"  {defer_count} [DEFER] finding(s) logged — no action taken")
+
+                    # Escalation or auto-apply items → escalate (Codex is read-only, can't apply fixes)
+                    if escalation_count > 0 or auto_apply_count > 0:
                         escalation_path = run_dir / "escalation.md"
                         generate_escalation_doc(escalation_path, story_key, findings, run_dir)
                         step_log.status = str(StepStatus.PAUSED)
                         step_log.paused_at = now_iso()
-                        all_findings = findings.get("design", []) + findings.get("fix", [])
+                        all_findings = (findings.get("design", []) + findings.get("spec_amend", [])
+                                        + findings.get("fix", []) + findings.get("security", [])
+                                        + findings.get("test_fix", []))
                         step_log.escalation = {
                             "findings": all_findings,
                             "escalation_doc": str(escalation_path),
@@ -578,10 +624,10 @@ def run_pipeline(
                         run_log.replace_or_append_step(step_log)
                         run_log.status = "paused"
                         reason_parts = []
-                        if design_count > 0:
-                            reason_parts.append(f"{design_count} [DESIGN]")
-                        if fix_count > 0:
-                            reason_parts.append(f"{fix_count} [FIX]")
+                        if escalation_count > 0:
+                            reason_parts.append(f"{escalation_count} escalation")
+                        if auto_apply_count > 0:
+                            reason_parts.append(f"{auto_apply_count} auto-apply")
                         reason = f"{' + '.join(reason_parts)} finding(s) from Codex review — manual action required"
                         run_log.human_interventions.add_planned(
                             reason=reason,
@@ -596,7 +642,7 @@ def run_pipeline(
                         sys.exit(3)
 
                     # Finding 2 fix: NOTE-only or unparseable output → pause for manual review
-                    if note_count > 0 and fix_count == 0 and design_count == 0:
+                    if note_count > 0 and auto_apply_count == 0 and escalation_count == 0:
                         step_log.status = str(StepStatus.PAUSED)
                         step_log.paused_at = now_iso()
                         step_log.escalation = {
@@ -619,8 +665,10 @@ def run_pipeline(
                         sys.exit(3)
 
                     # Also check for non-empty unparseable Codex output (no tags at all)
+                    all_parsed = (fix_count + security_count + test_fix_count
+                                  + defer_count + spec_amend_count + design_count + note_count)
                     findings_file = _find_findings_file(story_key, impl_artifacts)
-                    if findings_file and fix_count == 0 and design_count == 0 and note_count == 0:
+                    if findings_file and all_parsed == 0:
                         raw_content = _strip_stderr(findings_file.read_text()).strip()
                         # Non-trivial content with no recognized tags → suspicious
                         if len(raw_content) > 100:
@@ -637,7 +685,7 @@ def run_pipeline(
                             run_log.replace_or_append_step(step_log)
                             run_log.status = "paused"
                             reason = (
-                                "Codex output has no [FIX]/[DESIGN]/[NOTE] tags "
+                                "Codex output has no recognized category tags "
                                 "but is non-trivial — manual review required"
                             )
                             run_log.human_interventions.add_planned(reason=reason, step="code-review")
@@ -742,30 +790,56 @@ def run_pipeline(
             )
             log.debug(f"Claude exit code: {exit_code}")
 
-            # Parse findings for [FIX] vs [DESIGN] classification (AD-8)
+            # Parse findings with 6-category taxonomy
             findings = parse_review_findings(story_key, impl_artifacts)
             fix_count = len(findings.get("fix", []))
+            security_count = len(findings.get("security", []))
+            test_fix_count = len(findings.get("test_fix", []))
+            defer_count = len(findings.get("defer", []))
+            spec_amend_count = len(findings.get("spec_amend", []))
             design_count = len(findings.get("design", []))
+            note_count = len(findings.get("note", []))
 
             step_log.findings = {
-                "total": fix_count + design_count,
+                "total": (fix_count + security_count + test_fix_count
+                          + defer_count + spec_amend_count + design_count + note_count),
                 "fix": fix_count,
+                "security": security_count,
+                "test_fix": test_fix_count,
+                "defer": defer_count,
+                "spec_amend": spec_amend_count,
                 "design": design_count,
+                "note": note_count,
             }
 
-            log.info(f"  Findings: {fix_count} [FIX], {design_count} [DESIGN]")
+            log.info(
+                f"  Findings: {fix_count} [FIX], {security_count} [SECURITY], "
+                f"{test_fix_count} [TEST-FIX], {defer_count} [DEFER], "
+                f"{spec_amend_count} [SPEC-AMEND], {design_count} [DESIGN], {note_count} [NOTE]"
+            )
 
             # Apply safety heuristic — reclassify [FIX] → [DESIGN] if dangerous (AD-8)
+            # [SECURITY] and [TEST-FIX] are exempt from reclassification
             reclassified = apply_safety_heuristic(findings, config)
             if reclassified > 0:
                 design_count = len(findings.get("design", []))
                 fix_count = len(findings.get("fix", []))
                 log.warning(f"  Safety heuristic: {reclassified} [FIX] reclassified as [DESIGN]")
                 step_log.findings["reclassified"] = reclassified
+                step_log.findings["fix"] = fix_count
+                step_log.findings["design"] = design_count
 
-            # Phase 2 (spec 4.5.1): Re-verify after any [FIX] applications
-            if fix_count > 0:
-                log.info("  Re-verifying build+test after [FIX] applications...")
+            # Auto-apply count: [FIX] + [SECURITY] + [TEST-FIX]
+            auto_apply_count = fix_count + security_count + test_fix_count
+            # Escalation count: [DESIGN] + [SPEC-AMEND]
+            escalation_count = design_count + spec_amend_count
+
+            if defer_count > 0:
+                log.info(f"  {defer_count} [DEFER] finding(s) logged — no action taken")
+
+            # Phase 2 (spec 4.5.1): Re-verify after any auto-applied findings
+            if auto_apply_count > 0:
+                log.info(f"  Re-verifying build+test after {auto_apply_count} auto-applied finding(s)...")
                 # Phase 2 (spec 4.5.3): Invalidate stale test-results.json
                 stale_results = run_dir / "test-results.json"
                 if stale_results.exists():
@@ -773,44 +847,53 @@ def run_pipeline(
                     log.debug("  Invalidated stale test-results.json")
 
                 build_ok, test_ok = run_build_verify(project_root, run_dir, config)
-                step_log.fixes_applied = findings["fix"]
+                step_log.fixes_applied = (
+                    findings.get("fix", []) + findings.get("security", []) + findings.get("test_fix", [])
+                )
                 if not build_ok or not test_ok:
-                    log.warning("  Build/test failed after [FIX] applications")
+                    log.warning("  Build/test failed after auto-applied findings")
                     if not build_ok:
                         log.warning(f"  See: {run_dir / 'build-output.log'}")
                     if not test_ok:
                         log.warning(f"  See: {run_dir / 'test-output.log'}")
 
-            # If [DESIGN] items exist → pause with escalation (AD-11)
-            if design_count > 0:
+            # If [DESIGN] or [SPEC-AMEND] items exist → pause with escalation (AD-11)
+            if escalation_count > 0:
                 # Generate escalation document (Section 6.4)
                 escalation_path = run_dir / "escalation.md"
                 generate_escalation_doc(escalation_path, story_key, findings, run_dir)
 
                 step_log.status = str(StepStatus.PAUSED)
                 step_log.paused_at = now_iso()
+                escalation_findings = findings.get("design", []) + findings.get("spec_amend", [])
                 step_log.escalation = {
-                    "findings": findings["design"],
+                    "findings": escalation_findings,
                     "escalation_doc": str(escalation_path),
                     "test_results_at_pause": str(run_dir / "test-results.json"),
                 }
                 run_log.replace_or_append_step(step_log)
                 run_log.status = "paused"
+                reason_parts = []
+                if design_count > 0:
+                    reason_parts.append(f"{design_count} [DESIGN]")
+                if spec_amend_count > 0:
+                    reason_parts.append(f"{spec_amend_count} [SPEC-AMEND]")
+                reason = f"{' + '.join(reason_parts)} decision(s) required"
                 run_log.human_interventions.add_planned(
-                    reason=f"{design_count} [DESIGN] decision(s) required",
+                    reason=reason,
                     step="code-review",
                 )
                 run_log.save(run_log_path)
 
                 log.info(f"\n{'='*60}")
-                log.info(f"AUTOMATION PAUSED — {design_count} [DESIGN] decision(s) required")
+                log.info(f"AUTOMATION PAUSED — {reason}")
                 log.info(f"{'='*60}")
                 log.info(f"  Escalation doc: {escalation_path}")
                 log.info(f"  Resume: bmpipe run "
                          f"--story {story_key} --resume")
                 sys.exit(3)
 
-            # Check outcome — no [DESIGN] items
+            # Check outcome — no escalation items
             status = read_sprint_status(sprint_status)
             story_stat = get_story_status(status, story_key)
 
@@ -825,7 +908,7 @@ def run_pipeline(
                 break
 
             if story_stat == "in-progress":
-                # [FIX] items were applied but story needs more work
+                # Auto-applied items were applied but story needs more work
                 if attempt > config.review.max_retries:
                     step_log.status = str(StepStatus.FAILED)
                     run_log.replace_or_append_step(step_log)
@@ -837,7 +920,7 @@ def run_pipeline(
                     )
                     sys.exit(2)
 
-                log.info(f"  [FIX] issues found — re-running dev-story "
+                log.info(f"  Auto-applied findings found — re-running dev-story "
                          f"(retry {attempt}/{config.review.max_retries})")
 
                 # Re-run dev-story to apply fixes
@@ -1230,11 +1313,15 @@ def _strip_stderr(text: str) -> str:
 
 
 def parse_review_findings(story_key: str, impl_artifacts: Path) -> dict:
-    """Parse code-review-findings.md for [FIX], [DESIGN], [NOTE], and Codex [P1]/[P2] tags.
+    """Parse code-review-findings.md for 6-category taxonomy and Codex [P1]/[P2] tags.
 
-    Returns dict with 'fix', 'design', and 'note' lists containing finding dicts.
+    Categories: [FIX], [SECURITY], [TEST-FIX], [DEFER], [SPEC-AMEND], [DESIGN], [NOTE].
+    Returns dict with keys: fix, security, test_fix, defer, spec_amend, design, note.
     """
-    findings = {"fix": [], "design": [], "note": []}
+    findings = {
+        "fix": [], "security": [], "test_fix": [], "defer": [],
+        "spec_amend": [], "design": [], "note": [],
+    }
 
     findings_file = _find_findings_file(story_key, impl_artifacts)
     if not findings_file or not findings_file.exists():
@@ -1244,48 +1331,37 @@ def parse_review_findings(story_key: str, impl_artifacts: Path) -> dict:
     # Strip STDERR section before parsing (Codex output contains CLI metadata)
     text = _strip_stderr(raw_text)
 
-    # Parse [FIX] findings
-    fix_matches = re.findall(
-        r"\[FIX\]\s*[-:]?\s*(.+?)(?=\n\[(?:FIX|DESIGN|NOTE)\]|\n#{1,3}\s|\Z)",
-        text, re.DOTALL
-    )
-    for match in fix_matches:
-        summary = match.strip().split("\n")[0].strip()
-        file_refs = re.findall(r"`([^`]+\.\w+)`", match)
-        findings["fix"].append({
-            "summary": summary,
-            "files_affected": file_refs,
-        })
+    # Shared lookahead anchor for all category regexes — must list every tag
+    _TAG_LOOKAHEAD = r"(?:FIX|SECURITY|TEST-FIX|DEFER|SPEC-AMEND|DESIGN|NOTE)"
 
-    # Parse [DESIGN] findings
-    design_matches = re.findall(
-        r"\[DESIGN\]\s*[-:]?\s*(.+?)(?=\n\[(?:FIX|DESIGN|NOTE)\]|\n#{1,3}\s|\Z)",
-        text, re.DOTALL
-    )
-    for match in design_matches:
-        summary = match.strip().split("\n")[0].strip()
-        file_refs = re.findall(r"`([^`]+\.\w+)`", match)
-        findings["design"].append({
-            "summary": summary,
-            "files_affected": file_refs,
-        })
+    # Tag → findings dict key
+    _TAG_KEY_MAP = {
+        "FIX": "fix",
+        "SECURITY": "security",
+        "TEST-FIX": "test_fix",
+        "DEFER": "defer",
+        "SPEC-AMEND": "spec_amend",
+        "DESIGN": "design",
+        "NOTE": "note",
+    }
 
-    # Parse [NOTE] findings
-    note_matches = re.findall(
-        r"\[NOTE\]\s*[-:]?\s*(.+?)(?=\n\[(?:FIX|DESIGN|NOTE)\]|\n#{1,3}\s|\Z)",
-        text, re.DOTALL
-    )
-    for match in note_matches:
-        summary = match.strip().split("\n")[0].strip()
-        file_refs = re.findall(r"`([^`]+\.\w+)`", match)
-        findings["note"].append({
-            "summary": summary,
-            "files_affected": file_refs,
-        })
+    for tag, key in _TAG_KEY_MAP.items():
+        escaped = re.escape(tag)
+        matches = re.findall(
+            rf"\[{escaped}\]\s*[-:]?\s*(.+?)(?=\n\[{_TAG_LOOKAHEAD}\]|\n#{{1,3}}\s|\Z)",
+            text, re.DOTALL
+        )
+        for match in matches:
+            summary = match.strip().split("\n")[0].strip()
+            file_refs = re.findall(r"`([^`]+\.\w+)`", match)
+            findings[key].append({
+                "summary": summary,
+                "files_affected": file_refs,
+            })
 
     # Parse Codex [P1]/[P2]/[P3+] findings → P1/P2 map to fix, P3+ map to note
     codex_matches = re.findall(
-        r"^- \[P(\d+)\]\s*(.+?)(?=\n- \[P\d+\]|\n\[(?:FIX|DESIGN|NOTE)\]|\Z)",
+        rf"^- \[P(\d+)\]\s*(.+?)(?=\n- \[P\d+\]|\n\[{_TAG_LOOKAHEAD}\]|\Z)",
         text, re.DOTALL | re.MULTILINE
     )
     for priority, match in codex_matches:
@@ -1303,6 +1379,10 @@ def parse_review_findings(story_key: str, impl_artifacts: Path) -> dict:
 
 def apply_safety_heuristic(findings: dict, config: Config) -> int:
     """Reclassify [FIX] items as [DESIGN] if they trigger safety heuristics (AD-8).
+
+    Only [FIX] findings are candidates for reclassification. [SECURITY] and
+    [TEST-FIX] are exempt — additive security changes and test improvements
+    on architectural paths are intentional, not accidental.
 
     A [FIX] is reclassified if:
       - It affects more than config.safety.max_fix_files files
@@ -1342,21 +1422,33 @@ def generate_escalation_doc(path: Path, story_key: str, findings: dict,
     """Generate the escalation YAML document (Section 6.4)."""
     import yaml
 
+    design_findings = findings.get("design", [])
+    spec_amend_findings = findings.get("spec_amend", [])
+    all_escalation = design_findings + spec_amend_findings
+
+    reason_parts = []
+    if design_findings:
+        reason_parts.append(f"{len(design_findings)} [DESIGN]")
+    if spec_amend_findings:
+        reason_parts.append(f"{len(spec_amend_findings)} [SPEC-AMEND]")
+    pause_reason = f"{' + '.join(reason_parts)} finding(s) requiring human decision"
+
     escalation = {
         "story": story_key,
         "step": "code-review",
-        "pause_reason": f"{len(findings['design'])} findings classified as [DESIGN]",
+        "pause_reason": pause_reason,
         "findings": [],
         "test_results_at_pause": str(run_dir / "test-results.json"),
         "action_required": "Run Party Mode or make decisions manually",
         "resume_command": f"bmpipe run --story {story_key} --resume",
     }
 
-    for i, finding in enumerate(findings["design"], 1):
+    for i, finding in enumerate(all_escalation, 1):
+        classification = "spec_amend" if finding in spec_amend_findings else "design"
         escalation["findings"].append({
             "id": f"F-{i:03d}",
             "summary": finding["summary"],
-            "classification": "design",
+            "classification": classification,
             "files_affected": finding.get("files_affected", []),
         })
 

@@ -131,7 +131,10 @@ class TestShouldRunStep:
 class TestParseReviewFindings:
     def test_no_findings_file(self, tmp_path):
         result = parse_review_findings("9-9", tmp_path)
-        assert result == {"fix": [], "design": [], "note": []}
+        assert result == {
+            "fix": [], "security": [], "test_fix": [], "defer": [],
+            "spec_amend": [], "design": [], "note": [],
+        }
 
     def test_fix_findings(self, tmp_path):
         findings_file = tmp_path / "2-1-code-review-findings.md"
@@ -253,7 +256,10 @@ class TestParseReviewFindings:
             "index abc..def 100644\n"
         )
         result = parse_review_findings("4-2", tmp_path)
-        assert result == {"fix": [], "design": [], "note": []}
+        assert result == {
+            "fix": [], "security": [], "test_fix": [], "defer": [],
+            "spec_amend": [], "design": [], "note": [],
+        }
 
 
 class TestApplySafetyHeuristic:
@@ -294,6 +300,142 @@ class TestApplySafetyHeuristic:
         count = apply_safety_heuristic(findings, config)
         assert count == 1
         assert len(findings["design"]) == 1
+
+
+    def test_security_on_architectural_path_not_reclassified(self):
+        """AC A4-5: [SECURITY] on migration paths stays [SECURITY]."""
+        config = _default_config()
+        findings = {
+            "fix": [],
+            "security": [{
+                "summary": "FORCE RLS on migration",
+                "files_affected": ["db/migrations/001.sql"],
+            }],
+            "test_fix": [],
+            "defer": [],
+            "spec_amend": [],
+            "design": [],
+        }
+        count = apply_safety_heuristic(findings, config)
+        assert count == 0
+        assert len(findings["security"]) == 1
+        assert len(findings["design"]) == 0
+
+    def test_test_fix_on_architectural_path_not_reclassified(self):
+        """AC A4-2/A4-5: [TEST-FIX] on schema paths stays [TEST-FIX]."""
+        config = _default_config()
+        findings = {
+            "fix": [],
+            "security": [],
+            "test_fix": [{
+                "summary": "test improvement",
+                "files_affected": ["db/schema/test_helper.sql"],
+            }],
+            "defer": [],
+            "spec_amend": [],
+            "design": [],
+        }
+        count = apply_safety_heuristic(findings, config)
+        assert count == 0
+        assert len(findings["test_fix"]) == 1
+        assert len(findings["design"]) == 0
+
+    def test_fix_still_reclassified_with_new_categories_present(self):
+        """[FIX] on architectural path still reclassified even when other categories exist."""
+        config = _default_config()
+        findings = {
+            "fix": [{
+                "summary": "schema change",
+                "files_affected": ["db/schema/migration.sql"],
+            }],
+            "security": [{"summary": "add RLS", "files_affected": ["db/migrations/002.sql"]}],
+            "test_fix": [],
+            "defer": [],
+            "spec_amend": [],
+            "design": [],
+        }
+        count = apply_safety_heuristic(findings, config)
+        assert count == 1
+        assert len(findings["fix"]) == 0
+        assert len(findings["design"]) == 1
+        assert len(findings["security"]) == 1  # unchanged
+
+
+class TestParseReviewFindings6Categories:
+    """Story A-4: 6-category parsing tests."""
+
+    def test_security_findings(self, tmp_path):
+        findings_file = tmp_path / "2-1-code-review-findings.md"
+        findings_file.write_text(
+            "[SECURITY] Add FORCE RLS on `db/migrations/001.sql`\n"
+            "Defense-in-depth hardening.\n"
+        )
+        result = parse_review_findings("2-1", tmp_path)
+        assert len(result["security"]) == 1
+        assert "FORCE RLS" in result["security"][0]["summary"]
+
+    def test_test_fix_findings(self, tmp_path):
+        findings_file = tmp_path / "2-1-code-review-findings.md"
+        findings_file.write_text(
+            "[TEST-FIX] Improve assertion in `tests/test_auth.ts`\n"
+            "Test should check error message.\n"
+        )
+        result = parse_review_findings("2-1", tmp_path)
+        assert len(result["test_fix"]) == 1
+        assert "assertion" in result["test_fix"][0]["summary"].lower()
+
+    def test_defer_findings(self, tmp_path):
+        findings_file = tmp_path / "2-1-code-review-findings.md"
+        findings_file.write_text(
+            "[DEFER] Pre-existing tech debt in `legacy.ts`\n"
+            "Not introduced by this story.\n"
+        )
+        result = parse_review_findings("2-1", tmp_path)
+        assert len(result["defer"]) == 1
+        assert "tech debt" in result["defer"][0]["summary"].lower()
+
+    def test_spec_amend_findings(self, tmp_path):
+        findings_file = tmp_path / "2-1-code-review-findings.md"
+        findings_file.write_text(
+            "[SPEC-AMEND] Fix contradicts AC #3 in `handler.ts`\n"
+            "The spec says uppercase but fix lowercases.\n"
+        )
+        result = parse_review_findings("2-1", tmp_path)
+        assert len(result["spec_amend"]) == 1
+        assert "contradicts" in result["spec_amend"][0]["summary"].lower()
+
+    def test_all_six_categories(self, tmp_path):
+        findings_file = tmp_path / "2-1-code-review-findings.md"
+        findings_file.write_text(
+            "[FIX] Missing null check on `user.ts`\n\n"
+            "[SECURITY] Add FORCE RLS on `db/migrations/001.sql`\n\n"
+            "[TEST-FIX] Improve test in `tests/test_auth.ts`\n\n"
+            "[DEFER] Pre-existing debt in `legacy.ts`\n\n"
+            "[SPEC-AMEND] Contradicts AC in `handler.ts`\n\n"
+            "[DESIGN] Architecture concern with `api.ts`\n"
+        )
+        result = parse_review_findings("2-1", tmp_path)
+        assert len(result["fix"]) == 1
+        assert len(result["security"]) == 1
+        assert len(result["test_fix"]) == 1
+        assert len(result["defer"]) == 1
+        assert len(result["spec_amend"]) == 1
+        assert len(result["design"]) == 1
+
+    def test_backward_compat_old_style(self, tmp_path):
+        """Old-style [FIX]/[DESIGN] only output still works."""
+        findings_file = tmp_path / "2-1-code-review-findings.md"
+        findings_file.write_text(
+            "[FIX] Missing validation on `form.tsx`\n\n"
+            "[DESIGN] Architecture concern with `api.ts`\n"
+        )
+        result = parse_review_findings("2-1", tmp_path)
+        assert len(result["fix"]) == 1
+        assert len(result["design"]) == 1
+        assert len(result["security"]) == 0
+        assert len(result["test_fix"]) == 0
+        assert len(result["defer"]) == 0
+        assert len(result["spec_amend"]) == 0
 
 
 class TestGenerateEscalationDoc:

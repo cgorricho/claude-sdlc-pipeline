@@ -20,3 +20,7 @@
 ## From Story 7 — README & Documentation
 
 - **Document `--resume` vs `--resume-from` interaction**: README doesn't clarify how `--resume` and `--resume-from` interact when both are specified, or that `--resume-from` can start a fresh run if no prior run exists. Requires reading orchestrator resume logic to document accurately.
+
+## From Story A-4 — Safety Heuristic and Orchestrator Wiring
+
+- **`_CATEGORY_TO_SUMMARY_KEY` in contracts.py excludes `[NOTE]`**: The summary dict in `parse_review_findings_json()` has no `note` key, so `[NOTE]` findings count toward `total_findings` but have no corresponding summary entry. Pre-existing from A-2, not introduced by A-4.
