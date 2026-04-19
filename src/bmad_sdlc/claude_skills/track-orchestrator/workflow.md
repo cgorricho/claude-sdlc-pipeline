@@ -87,11 +87,27 @@ Input:
 Output:
 - `docs/epic-story-dependency-graph.md`
 
-Use `python3 helpers/state.py runnable` to identify stories with all dependencies met.
+Run the graph generator:
 
-If the graph already exists and source files haven't changed (mtime comparison), skip regeneration.
+```bash
+python3 helpers/state.py generate-graph --output docs/epic-story-dependency-graph.md
+```
 
-<!-- Story B-2 fills in the full dependency graph generation logic -->
+The generator:
+1. Parses the CSV `dependencies` column — resolves story-to-story refs, ranges, and epic-level deps ("Epic N complete")
+2. Computes parallelization layers via topological sort (layer 0 = no deps, layer N = deps all in earlier layers)
+3. Writes a markdown document with a dependency table and parallel execution layers
+4. Checks mtime — skips regeneration if the graph is newer than all source files
+
+To force regeneration (e.g., after manual edits to the CSV):
+
+```bash
+python3 helpers/state.py generate-graph --output docs/epic-story-dependency-graph.md --force
+```
+
+If the generator detects a dependency cycle, it exits 1 and reports the involved stories.
+
+After generation, read the graph document to understand the layer structure before proceeding to Step 2.
 
 </step>
 

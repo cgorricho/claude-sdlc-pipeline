@@ -12,6 +12,7 @@ Usage:
     python3 state.py epic-status <epic-id> # Check if an epic is complete (all stories done)
     python3 state.py summary                # Print a summary of current sprint state
     python3 state.py update-csv <story-id> <new-status>  # Update CSV (single-writer, safe)
+    python3 state.py generate-graph [--output PATH] [--force]  # Generate dependency graph
 
 Exit codes:
     0 — success
@@ -25,6 +26,7 @@ Override with --root /path/to/project.
 import csv
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -104,40 +106,89 @@ def story_id_to_key(story_id: str, stories: list[dict]) -> Optional[str]:
 
 
 def parse_dependencies(dep_field: str, stories: list[dict]) -> list[str]:
-    """Parse dependency field from CSV into list of story_keys that must be 'done'."""
+    """Parse dependency field from CSV into list of story_keys that must be 'done'.
+
+    Supported formats:
+    - Story reference: "1.1" → story key for story 1.1
+    - Range: "1.1-1.5" → story keys for stories 1.1 through 1.5
+    - Epic-level: "Epic 1 complete" or "Epic 1" → all story keys in Epic 1
+    """
     if not dep_field or not dep_field.strip():
         return []
 
     deps = []
     tokens = dep_field.replace(",", " ").split()
+    i = 0
 
-    for token in tokens:
-        token = token.strip()
+    while i < len(tokens):
+        token = tokens[i].strip()
         if not token:
+            i += 1
             continue
-        if token.lower().startswith("epic"):
+
+        # Epic-level dependency: "Epic N [complete]"
+        if token.lower() == "epic":
+            # Next token should be the epic number
+            if i + 1 < len(tokens):
+                epic_token = tokens[i + 1].strip()
+                try:
+                    epic_num = int(epic_token)
+                    # Resolve all stories in this epic
+                    for s in stories:
+                        try:
+                            if int(s.get("epic_id", "")) == epic_num:
+                                key = story_id_to_key(s["story_id"], stories)
+                                if key:
+                                    deps.append(key)
+                        except (ValueError, KeyError):
+                            continue
+                    i += 2
+                    # Skip optional "complete" word
+                    if i < len(tokens) and tokens[i].strip().lower() == "complete":
+                        i += 1
+                    continue
+                except (ValueError, KeyError):
+                    pass
+            i += 1
             continue
+
         if "(" in token or ")" in token:
+            i += 1
             continue
+
+        # Range dependency: "1.1-1.5"
         if "-" in token and not token.startswith("-"):
             parts = token.split("-")
             if len(parts) == 2 and all("." in p for p in parts):
                 start_epic, start_num = parts[0].split(".")
                 end_epic, end_num = parts[1].split(".")
                 if start_epic == end_epic:
-                    for i in range(int(start_num), int(end_num) + 1):
-                        sid = f"{start_epic}.{i}"
+                    for n in range(int(start_num), int(end_num) + 1):
+                        sid = f"{start_epic}.{n}"
                         key = story_id_to_key(sid, stories)
                         if key:
                             deps.append(key)
-                continue
+            i += 1
+            continue
+
+        # Single story dependency: "1.1"
         if "." in token:
             key = story_id_to_key(token, stories)
             if key:
                 deps.append(key)
+            i += 1
             continue
 
-    return deps
+        i += 1
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_deps = []
+    for d in deps:
+        if d not in seen:
+            seen.add(d)
+            unique_deps.append(d)
+    return unique_deps
 
 
 def get_story_key_by_id(story_id: str, stories: list[dict], status: dict) -> Optional[str]:
@@ -280,6 +331,183 @@ def update_csv(root: Path, story_id: str, new_status: str) -> dict:
     return {"success": True, "story_id": story_id, "new_status": new_status}
 
 
+def graph_is_current(output_path: Path, csv_path: Path, epics_paths: list[Path]) -> bool:
+    """Check if the dependency graph is newer than all source files."""
+    if not output_path.exists():
+        return False
+    graph_mtime = output_path.stat().st_mtime
+    source_paths = [csv_path] + epics_paths
+    for src in source_paths:
+        if src.exists() and src.stat().st_mtime > graph_mtime:
+            return False
+    return True
+
+
+def _find_epics_sources(root: Path) -> list[Path]:
+    """Find epics source files (epics.md or sharded equivalents)."""
+    planning = root / "_bmad-output" / "planning-artifacts"
+    sources = []
+    if planning.is_dir():
+        for f in planning.iterdir():
+            if f.is_file() and "epic" in f.name.lower() and f.suffix == ".md":
+                sources.append(f)
+    return sources
+
+
+def _compute_layers(stories: list[dict]) -> tuple[dict[str, int], list[str]]:
+    """Compute parallelization layers via topological sort.
+
+    Returns (layer_map, cycle_members):
+    - layer_map: {story_id: layer_number}
+    - cycle_members: list of story_ids involved in cycles (empty if no cycles)
+    """
+    # Build adjacency: story_id -> list of dependency story_ids
+    story_ids = {s["story_id"] for s in stories}
+    dep_map: dict[str, list[str]] = {}
+    for s in stories:
+        raw_deps = parse_dependencies(s.get("dependencies", ""), stories)
+        # raw_deps are story_keys — convert back to story_ids
+        dep_ids = []
+        for dep_key in raw_deps:
+            for other in stories:
+                other_key = story_id_to_key(other["story_id"], stories)
+                if other_key == dep_key and other["story_id"] in story_ids:
+                    dep_ids.append(other["story_id"])
+                    break
+        dep_map[s["story_id"]] = dep_ids
+
+    # Kahn's algorithm for topological layering
+    layer_map: dict[str, int] = {}
+    remaining = set(story_ids)
+    current_layer = 0
+
+    while remaining:
+        # Find stories whose deps are all assigned to previous layers
+        ready = []
+        for sid in remaining:
+            deps = dep_map.get(sid, [])
+            if all(d in layer_map or d not in story_ids for d in deps):
+                ready.append(sid)
+
+        if not ready:
+            # Cycle detected — all remaining stories are in cycles
+            return layer_map, sorted(remaining)
+
+        for sid in ready:
+            layer_map[sid] = current_layer
+            remaining.discard(sid)
+        current_layer += 1
+
+    return layer_map, []
+
+
+def generate_graph(root: Path, output_path: Path, force: bool = False) -> dict:
+    """Generate the dependency graph document.
+
+    Returns a JSON-serializable summary dict.
+    """
+    _, _, csv_path = get_paths(root)
+    epics_sources = _find_epics_sources(root)
+
+    # Mtime check
+    if not force and graph_is_current(output_path, csv_path, epics_sources):
+        return {"action": "skipped", "reason": "Graph up to date", "output": str(output_path)}
+
+    stories = parse_csv(csv_path)
+
+    # Compute layers
+    layer_map, cycle_members = _compute_layers(stories)
+    if cycle_members:
+        print(f"ERROR: Dependency cycle detected involving stories: {', '.join(cycle_members)}", file=sys.stderr)
+        sys.exit(1)
+
+    # Build the markdown document
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    csv_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    epics_mtime_str = ""
+    if epics_sources:
+        latest = max(s.stat().st_mtime for s in epics_sources)
+        epics_mtime_str = datetime.fromtimestamp(latest, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    lines = [
+        "# Epic-Story Dependency Graph",
+        "",
+        f"Generated: {now}",
+        f"Sources: epics-and-stories.csv ({csv_mtime})",
+    ]
+    if epics_mtime_str:
+        lines[-1] += f", epics docs ({epics_mtime_str})"
+    lines.append("")
+
+    # Dependency table
+    lines.append("## Dependency Table")
+    lines.append("")
+    lines.append("| Story ID | Title | Epic | Dependencies | Layer |")
+    lines.append("|----------|-------|------|-------------|-------|")
+
+    max_layer = max(layer_map.values()) if layer_map else 0
+    for s in stories:
+        sid = s["story_id"]
+        title = s["story_title"]
+        epic = s["epic_id"]
+        raw_deps = parse_dependencies(s.get("dependencies", ""), stories)
+        # Convert keys back to story_ids for display
+        dep_display = []
+        for dep_key in raw_deps:
+            for other in stories:
+                other_key = story_id_to_key(other["story_id"], stories)
+                if other_key == dep_key:
+                    dep_display.append(other["story_id"])
+                    break
+        dep_str = ", ".join(dep_display) if dep_display else "—"
+        layer = layer_map.get(sid, "?")
+        lines.append(f"| {sid} | {title} | {epic} | {dep_str} | {layer} |")
+
+    lines.append("")
+
+    # Parallel execution layers
+    lines.append("## Parallel Execution Layers")
+    lines.append("")
+    for layer_num in range(max_layer + 1):
+        layer_stories = [s for s in stories if layer_map.get(s["story_id"]) == layer_num]
+        if not layer_stories:
+            continue
+        label = "Layer 0 (no dependencies)" if layer_num == 0 else f"Layer {layer_num}"
+        lines.append(f"### {label}")
+        lines.append("")
+        for s in layer_stories:
+            sid = s["story_id"]
+            title = s["story_title"]
+            raw_deps = parse_dependencies(s.get("dependencies", ""), stories)
+            dep_display = []
+            for dep_key in raw_deps:
+                for other in stories:
+                    other_key = story_id_to_key(other["story_id"], stories)
+                    if other_key == dep_key:
+                        dep_display.append(other["story_id"])
+                        break
+            if dep_display:
+                lines.append(f"- {sid}: {title} (depends on: {', '.join(dep_display)})")
+            else:
+                lines.append(f"- {sid}: {title}")
+        lines.append("")
+
+    # Write the file
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines))
+
+    return {
+        "action": "generated",
+        "output": str(output_path),
+        "total_stories": len(stories),
+        "total_layers": max_layer + 1,
+        "layer_summary": {
+            str(layer_num): len([s for s in stories if layer_map.get(s["story_id"]) == layer_num])
+            for layer_num in range(max_layer + 1)
+        },
+    }
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__, file=sys.stderr)
@@ -338,6 +566,20 @@ def main():
         print(json.dumps(result, indent=2))
         if not result["success"]:
             sys.exit(1)
+
+    elif cmd == "generate-graph":
+        project_root = root or find_project_root()
+        # Parse --output and --force flags
+        output_path = project_root / "docs" / "epic-story-dependency-graph.md"
+        force = "--force" in args
+        if "--output" in args:
+            idx = args.index("--output")
+            if idx + 1 < len(args):
+                output_path = Path(args[idx + 1])
+                if not output_path.is_absolute():
+                    output_path = project_root / output_path
+        result = generate_graph(project_root, output_path, force=force)
+        print(json.dumps(result, indent=2))
 
     else:
         print(f"Unknown command: {cmd}", file=sys.stderr)

@@ -31,3 +31,10 @@
 - **Subagent failure timeout**: No mechanism for detecting subagents that die silently, hang indefinitely, or produce no notification. B-3 should add a timeout or health-check fallback.
 - **Per-story branching race condition**: Steps 4 and 8 use `git checkout` which changes the shared working directory under all subagents. B-6 must use git worktrees or separate clones instead of checkout-based branching.
 - **Retro subagent timeout**: `retro.gate: auto` spawns a retrospective subagent with no timeout or failure path. B-5 should add error handling for retro subagent hangs/failures.
+
+## From Story B-2 — Dependency Graph Generation
+
+- **Cross-epic range silently dropped**: `parse_dependencies` ignores ranges like `"1.5-2.3"` where start and end epics differ. No warning emitted. Pre-existing in the original implementation.
+- **`story_id_to_key` crashes on dotless story_id**: If a CSV row has `story_id` without a dot (e.g., a milestone row), `split(".")` unpacking fails with `ValueError`. Pre-existing.
+- **Missing CSV columns cause raw KeyError**: No guard on required columns (`story_id`, `story_title`, `epic_id`). Crash with Python traceback instead of clean exit. Pre-existing.
+- **Duplicate titles produce ambiguous story keys**: `story_id_to_key()` builds keys from titles — two stories with identical titles get the same key, breaking reverse lookups. Pre-existing.
