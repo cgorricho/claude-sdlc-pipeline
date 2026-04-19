@@ -299,11 +299,12 @@ The orchestrator and subagent overhead is minimal relative to workflow execution
 **ACs:**
 - AC B5-1: On story completion (trace PASS), orchestrator updates CSV via `state.py update-csv`
 - AC B5-2: Orchestrator checks epic completion via `state.py epic-status`
-- AC B5-3: If epic complete and `retro.gate: advisory` → print banner suggesting `/bmad-retrospective`
-- AC B5-4: If epic complete and `retro.gate: blocking` → pause new spawning until retro confirmed
-- AC B5-5: Re-run `state.py runnable` to find newly unblocked stories
-- AC B5-6: If runnable stories exist and current concurrent < max, spawn new subagents (with stagger)
-- AC B5-7: Final report generated when all planned stories complete — summary with per-story outcomes, wall-clock time, token estimates
+- AC B5-3: If epic complete and `retro.gate: advisory` → print banner suggesting `/bmad-retrospective`, continue with next epic
+- AC B5-4: If epic complete and `retro.gate: blocking` → pause new spawning until human confirms retro is done
+- AC B5-5: If epic complete and `retro.gate: auto` → spawn a subagent to run `/bmad-retrospective`, wait for completion, log the retro output, then proceed to next epic. Same subagent pattern as story execution — orchestrator receives the retro report and continues.
+- AC B5-6: Re-run `state.py runnable` to find newly unblocked stories
+- AC B5-7: If runnable stories exist and current concurrent < max, spawn new subagents (with stagger)
+- AC B5-8: Final report generated when all planned stories complete — summary with per-story outcomes, wall-clock time, token estimates
 
 **Files:** `workflow.md` (Steps 8-10 implementation), `helpers/state.py`
 
@@ -397,7 +398,7 @@ Gaps 1-8 are addressed by Epic A. This epic consumes the 6-category taxonomy fro
 
 4. **Merge conflict resolution** — Story B-6 escalates merge conflicts to human. Should the orchestrator attempt auto-resolution for trivial conflicts (e.g., both stories added to the same file but in different sections)?
 
-5. **Epic retro gate** — default is `advisory` (print banner, continue). Should `blocking` be supported in Phase 2 or deferred to Phase 3?
+5. **Epic retro gate** — three modes: `advisory` (notify, continue), `blocking` (pause until human confirms), `auto` (run retro as subagent, wait, continue). Default: `advisory`. Which should be the default for Phase 2?
 
 ---
 
