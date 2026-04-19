@@ -182,6 +182,97 @@ class TestCodeReviewPrompt:
         assert "src/app.ts" in prompt
         assert '"total": 10' in prompt
 
+    def test_six_category_taxonomy(self, default_config):
+        """AC A3-1: Prompt includes the 6-category taxonomy with definitions."""
+        prompt = code_review_prompt(
+            "/path/story.md",
+            file_inventory="src/app.ts",
+            test_summary="{}",
+            config=default_config,
+        )
+        for category in ["[FIX]", "[SECURITY]", "[TEST-FIX]", "[DEFER]", "[SPEC-AMEND]", "[DESIGN]"]:
+            assert category in prompt, f"Missing category {category}"
+        assert "Finding Classification Taxonomy" in prompt
+
+    def test_story_content_included(self, default_config):
+        """AC A3-2: Prompt includes story file content when provided."""
+        prompt = code_review_prompt(
+            "/path/story.md",
+            file_inventory="src/app.ts",
+            test_summary="{}",
+            config=default_config,
+            story_content="## ACs\n- AC-1: Given X When Y Then Z",
+        )
+        assert "Story Spec (for classification context)" in prompt
+        assert "AC-1: Given X When Y Then Z" in prompt
+
+    def test_story_content_omitted_when_empty(self, default_config):
+        """Story spec section not included when story_content is empty."""
+        prompt = code_review_prompt(
+            "/path/story.md",
+            file_inventory="src/app.ts",
+            test_summary="{}",
+            config=default_config,
+            story_content="",
+        )
+        assert "Story Spec" not in prompt
+
+    def test_spec_amend_instruction(self, default_config):
+        """AC A3-3: Prompt instructs SPEC-AMEND for AC contradictions."""
+        prompt = code_review_prompt(
+            "/path/story.md",
+            file_inventory="f",
+            test_summary="{}",
+            config=default_config,
+        )
+        assert "contradicts or changes what the acceptance criteria literally state" in prompt
+        assert "[SPEC-AMEND]" in prompt
+
+    def test_defer_instruction(self, default_config):
+        """AC A3-4: Prompt instructs DEFER for pre-existing issues."""
+        prompt = code_review_prompt(
+            "/path/story.md",
+            file_inventory="f",
+            test_summary="{}",
+            config=default_config,
+        )
+        assert "pre-existing issue not introduced by this story" in prompt
+        assert "[DEFER]" in prompt
+
+    def test_security_instruction(self, default_config):
+        """AC A3-5: Prompt instructs SECURITY for defense-in-depth."""
+        prompt = code_review_prompt(
+            "/path/story.md",
+            file_inventory="f",
+            test_summary="{}",
+            config=default_config,
+        )
+        assert "security hardening (defense-in-depth)" in prompt
+        assert "[SECURITY]" in prompt
+
+    def test_test_fix_instruction(self, default_config):
+        """AC A3-6: Prompt instructs TEST-FIX for test-only changes."""
+        prompt = code_review_prompt(
+            "/path/story.md",
+            file_inventory="f",
+            test_summary="{}",
+            config=default_config,
+        )
+        assert "improves test code (not production code)" in prompt
+        assert "[TEST-FIX]" in prompt
+
+    def test_backward_compat_old_categories_still_present(self, default_config):
+        """AC A3-7: Old-style [FIX]/[DESIGN] are valid categories in the taxonomy."""
+        prompt = code_review_prompt(
+            "/path/story.md",
+            file_inventory="f",
+            test_summary="{}",
+            config=default_config,
+        )
+        # Both old categories remain in the taxonomy — parser handles them
+        assert "[FIX]" in prompt
+        assert "[DESIGN]" in prompt
+
 
 class TestModeBCursorPrompt:
     def test_basic_structure(self, default_config):

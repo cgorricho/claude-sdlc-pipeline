@@ -171,17 +171,41 @@ are complete.
 
 
 def code_review_prompt(story_file_path: str, file_inventory: str,
-                       test_summary: str, config: Config, arch_excerpts: str = "") -> str:
+                       test_summary: str, config: Config,
+                       arch_excerpts: str = "",
+                       story_content: str = "") -> str:
     """Build the prompt for code-review step (Mode A)."""
     prompt = f"""\
 {config.workflows['code-review']}
 
 The story file is at: {story_file_path}
 
-Be thorough and critical. Tag each finding as [FIX] (clear, checklist-
-verifiable fix) or [DESIGN] (requires architectural judgment). For [FIX]
-findings, apply the fix directly. For [DESIGN] findings, document them
-fully with options and affected files.
+Be thorough and critical. Classify each finding using the taxonomy below.
+
+## Finding Classification Taxonomy
+
+Tag every finding with exactly one of these categories:
+
+| Category | Meaning | Action |
+|----------|---------|--------|
+| `[FIX]` | Code bug, trivially fixable, no judgment needed | Auto-apply, re-verify |
+| `[SECURITY]` | Defense-in-depth hardening, always apply | Auto-apply with elevated verification |
+| `[TEST-FIX]` | Test code improvement, not production code | Auto-apply, note in audit trail |
+| `[DEFER]` | Real issue, not this story's scope | Log, no action |
+| `[SPEC-AMEND]` | Fix is trivial but changes the spec's intent | Always escalate to human |
+| `[DESIGN]` | Architectural decision, requires human judgment | Always escalate to human |
+
+### Classification Rules
+
+- If a fix contradicts or changes what the acceptance criteria literally state, classify as \
+[SPEC-AMEND] even if the code change is trivial.
+- If a finding is about a pre-existing issue not introduced by this story, classify as [DEFER].
+- If a finding adds security hardening (defense-in-depth), classify as [SECURITY].
+- If a finding improves test code (not production code), classify as [TEST-FIX].
+- For [FIX] findings, apply the fix directly.
+- For [DESIGN] findings, document them fully with options and affected files.
+- For [DEFER] findings, describe the issue but take no action.
+- For [SPEC-AMEND] findings, describe how the fix changes the spec's intent.
 
 ## File Inventory
 {file_inventory}
@@ -189,6 +213,8 @@ fully with options and affected files.
 ## Test Results Summary
 {test_summary}
 """
+    if story_content:
+        prompt += f"\n## Story Spec (for classification context)\n{story_content}\n"
     if arch_excerpts:
         prompt += f"\n## Architecture Excerpts\n{arch_excerpts}"
     return prompt

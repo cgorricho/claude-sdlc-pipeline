@@ -719,11 +719,14 @@ def run_pipeline(
 
             suffix = f".attempt{attempt}" if attempt > 1 else ""
 
+            story_text = story_file.read_text() if story_file.exists() else ""
+
             prompt = code_review_prompt(
                 str(story_file),
                 file_inventory=file_inv,
                 test_summary=test_summary_str,
                 config=config,
+                story_content=story_text,
             )
             run_log.prompt_sizes[f"code-review{suffix}"] = len(prompt)
             log.debug(f"Prompt size: {len(prompt)} chars ({measure_prompt(prompt)} est. tokens)")
