@@ -255,7 +255,7 @@ def run_pipeline(
             log.info(f"  create-story completed ✓ ({step_log.duration_seconds}s)")
 
     if stop_after == "create-story":
-        _stop_after_exit(run_log, run_log_path, "create-story", story_key, log)
+        _stop_after_exit(run_log, run_log_path, "create-story", story_key, log, pipeline_steps)
 
     # ── STEP 2: ATDD ─────────────────────────────────────────────
     if should_run_step("atdd", start_from, skip_atdd, pipeline_steps, stop_after=stop_after):
@@ -303,7 +303,7 @@ def run_pipeline(
         log.info(f"  atdd completed ✓ ({step_log.duration_seconds}s)")
 
     if stop_after == "atdd":
-        _stop_after_exit(run_log, run_log_path, "atdd", story_key, log)
+        _stop_after_exit(run_log, run_log_path, "atdd", story_key, log, pipeline_steps)
 
     # ── STEP 3: Dev Story + Verify ────────────────────────────────
     if should_run_step("dev-story", start_from, False, pipeline_steps, stop_after=stop_after):
@@ -397,7 +397,7 @@ def run_pipeline(
         log.info(f"  dev-story {step_log.status} ✓ ({step_log.duration_seconds}s)")
 
     if stop_after == "dev-story":
-        _stop_after_exit(run_log, run_log_path, "dev-story", story_key, log)
+        _stop_after_exit(run_log, run_log_path, "dev-story", story_key, log, pipeline_steps)
 
     # ── STEP 3: Code Review (with retry + escalation) ─────────────
     if should_run_step("code-review", start_from, False, pipeline_steps, stop_after=stop_after):
@@ -873,7 +873,7 @@ def run_pipeline(
             sys.exit(1)
 
     if stop_after == "code-review":
-        _stop_after_exit(run_log, run_log_path, "code-review", story_key, log)
+        _stop_after_exit(run_log, run_log_path, "code-review", story_key, log, pipeline_steps)
 
     # ── STEP 4: Trace (optional) ──────────────────────────────────
     if should_run_step("trace", start_from, skip_trace, pipeline_steps, stop_after=stop_after):
@@ -947,6 +947,9 @@ def run_pipeline(
         log.info(f"  trace completed ✓ ({step_log.duration_seconds}s)")
     elif skip_trace:
         log.info("Step 5/5: Skipping trace (--skip-trace)")
+
+    if stop_after is not None:
+        _stop_after_exit(run_log, run_log_path, stop_after, story_key, log, pipeline_steps)
 
     # ── DONE ──────────────────────────────────────────────────────
     run_log.status = "completed"
@@ -1084,7 +1087,8 @@ def log_step_skip(run_log: RunLog, step: str, reason: str, config: Config):
     run_log.replace_or_append_step(step_log)
 
 
-def _stop_after_exit(run_log: RunLog, run_log_path: Path, step: str, story_key: str, log):
+def _stop_after_exit(run_log: RunLog, run_log_path: Path, step: str, story_key: str, log,
+                     pipeline_steps: list[str] | None = None):
     """Save run log as stopped and exit after --stop-after step completes."""
     run_log.status = "stopped"
     run_log.stopped_after = step
@@ -1093,18 +1097,19 @@ def _stop_after_exit(run_log: RunLog, run_log_path: Path, step: str, story_key: 
     run_log.wall_clock_seconds = run_log.compute_wall_clock()
     run_log.total_duration_seconds = run_log.execution_time_seconds
     run_log.save(run_log_path)
+    if pipeline_steps is None:
+        pipeline_steps = ["create-story", "atdd", "dev-story", "code-review", "trace"]
     log.info(f"\nPipeline stopped after '{step}' (--stop-after)")
     log.info(f"  Resume: bmpipe run --story {story_key} --resume-from "
-             f"{_next_step_name(step, run_log)}")
+             f"{_next_step_name(step, pipeline_steps)}")
     sys.exit(0)
 
 
-def _next_step_name(step: str, run_log: RunLog) -> str:
+def _next_step_name(step: str, pipeline_steps: list[str]) -> str:
     """Return the name of the step after the given one."""
-    pipeline = ["create-story", "atdd", "dev-story", "code-review", "trace"]
     try:
-        idx = pipeline.index(step)
-        return pipeline[idx + 1] if idx + 1 < len(pipeline) else step
+        idx = pipeline_steps.index(step)
+        return pipeline_steps[idx + 1] if idx + 1 < len(pipeline_steps) else step
     except ValueError:
         return step
 

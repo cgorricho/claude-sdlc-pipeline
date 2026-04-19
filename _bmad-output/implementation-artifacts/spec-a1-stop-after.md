@@ -2,7 +2,7 @@
 title: 'A-1: --stop-after flag for bmpipe run'
 type: 'feature'
 created: '2026-04-18'
-status: 'in-review'
+status: 'done'
 baseline_commit: '2ad546d'
 context: []
 ---
@@ -73,3 +73,42 @@ context: []
 **Commands:**
 - `pytest tests/test_cli.py tests/test_orchestrator.py -v` -- expected: all tests pass
 - `ruff check src/bmad_sdlc/cli.py src/bmad_sdlc/orchestrator.py src/bmad_sdlc/run_log.py` -- expected: no lint errors
+
+## Suggested Review Order
+
+**CLI entry point**
+
+- New `--stop-after` option and mutual exclusion guard
+  [`cli.py:88`](../../src/bmad_sdlc/cli.py#L88)
+
+**Step gating logic**
+
+- `should_run_step` now accepts and enforces `stop_after` boundary
+  [`orchestrator.py:1034`](../../src/bmad_sdlc/orchestrator.py#L1034)
+
+- Dry-run output shows STOP markers for steps beyond stop_after
+  [`orchestrator.py:194`](../../src/bmad_sdlc/orchestrator.py#L194)
+
+**Stop-after exit flow**
+
+- `_stop_after_exit` saves run log as stopped and prints resume hint
+  [`orchestrator.py:1090`](../../src/bmad_sdlc/orchestrator.py#L1090)
+
+- Catch-all sentinel before DONE block handles `--stop-after trace`
+  [`orchestrator.py:952`](../../src/bmad_sdlc/orchestrator.py#L952)
+
+- `_next_step_name` uses config pipeline_steps, not hardcoded list
+  [`orchestrator.py:1107`](../../src/bmad_sdlc/orchestrator.py#L1107)
+
+**Run log data model**
+
+- `stopped_after` field and `stopped` status on RunLog
+  [`run_log.py:89`](../../src/bmad_sdlc/run_log.py#L89)
+
+**Tests**
+
+- CLI: option parsing, mutual exclusion, pass-through to `run_pipeline`
+  [`test_cli.py:385`](../../tests/test_cli.py#L385)
+
+- Orchestrator: `should_run_step` boundary tests with stop_after
+  [`test_orchestrator.py:104`](../../tests/test_orchestrator.py#L104)

@@ -86,7 +86,7 @@ class RunLog:
     story: str
     story_type: str = "feature"
     started: str = ""
-    status: str = "running"                         # running | completed | paused | failed
+    status: str = "running"                         # running | completed | stopped | paused | failed
     dev_model: str = ""
     review_model: str = ""
     review_mode: str = "A"
