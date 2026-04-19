@@ -242,33 +242,42 @@ The orchestrator and subagent overhead is minimal relative to workflow execution
 
 **What:** Implement the core subagent lifecycle — spawn background subagents (one per story), receive completion notifications, and handle the report-back flow. This is the heart of the orchestrator.
 
+**Critical insight from Atlas field experience:** ANY BMAD workflow step can pause for human input — not just code-review. The create-story, atdd, dev-story, and trace workflows all contain HALT conditions and questions that need human answers. The subagent must surface ANY pause to the orchestrator, regardless of which step caused it. The orchestrator is the **single communication hub** between all running subagents and the human — no subagent should sit idle waiting for a human who doesn't know it's waiting.
+
 **ACs:**
 - AC B3-1: Orchestrator spawns subagents using the Claude Code Agent tool with `run_in_background: true`
-- AC B3-2: Each subagent receives a prompt that includes: story ID, story key, `bmpipe run --story {id} --stop-after review` command, instructions to report structured results
+- AC B3-2: Each subagent receives a prompt that includes: story ID, story key, `bmpipe run --story {id}` command, instructions to report structured results and to surface ANY question or pause back to the orchestrator immediately
 - AC B3-3: Orchestrator is notified when each subagent completes (Claude Code native notification)
-- AC B3-4: Subagent report includes: story_id, exit_code, path to review-findings.json, summary of findings
-- AC B3-5: Orchestrator tracks active subagents by ID and story_id
-- AC B3-6: Max concurrent subagents enforced (from config, default 3)
+- AC B3-4: Subagent report includes: story_id, exit_code, current_step (which workflow step paused or completed), question_or_finding (what needs attention), path to review-findings.json (if review step reached)
+- AC B3-5: Orchestrator tracks active subagents by ID, story_id, and current state (running, paused, needs-human, completed)
+- AC B3-6: Max concurrent subagents enforced (from config, default 3, overridable via `--max` CLI arg)
 - AC B3-7: Launch stagger between subagents (from config, default 8 seconds)
 - AC B3-8: User presented with plan before spawning — must confirm
+- AC B3-9: When a subagent reports a pause from ANY step (not just code-review), orchestrator decides: can I answer this with LLM reasoning, or does the human need to decide? If orchestrator can answer → SendMessage the answer back. If human needed → present in main session, relay via SendMessage.
+- AC B3-10: Orchestrator status display shows per-subagent state including which step is active and whether it's waiting for input
 
 **Files:** `workflow.md` (Steps 3-5 implementation)
 
 **Dev Notes:**
 - The subagent prompt template is critical — it must instruct the subagent to:
-  1. Run `bmpipe run --story {id} --stop-after review`
-  2. Read `review-findings.json` from the run directory
-  3. Report back with structured summary
+  1. Run `bmpipe run --story {id}` (full pipeline, no --stop-after initially)
+  2. If bmpipe pauses (exit 3) or any workflow asks a question → report back immediately with the question/context
+  3. If bmpipe completes successfully → report back with structured summary
+  4. Read `review-findings.json` from the run directory if review step was reached
+- The orchestrator-as-communication-hub pattern means subagents NEVER wait silently. Any question goes to the orchestrator, which either answers it or escalates to the human.
+- This replaces the previous `--stop-after review` design for the default flow. The orchestrator may still use `--stop-after` for specific strategies, but the default is full pipeline execution with pause-on-question.
 - Start with a single subagent in Phase 1 validation before testing parallel spawning
 - Risk: subagents running `bmpipe` which runs Claude Code sessions = two levels deep. Phase 1 validates this works.
 
 ---
 
-### Story B-4: Review Finding Classification and Fix Cycle
+### Story B-4: Orchestrator Decision Hub — Classification, Questions, and Fix Cycle
 
-**What:** Implement the orchestrator's classification logic — read findings from subagent reports, classify using LLM reasoning against the 6-category taxonomy, and execute the appropriate action (auto-apply, escalate, defer, log).
+**What:** Implement the orchestrator's central decision-making logic. This handles TWO types of subagent reports: (1) review findings to classify and act on, and (2) questions/pauses from any workflow step that need answers. The orchestrator uses LLM reasoning for both — it either answers the question itself or escalates to the human.
 
 **ACs:**
+
+*Review finding classification (code-review step):*
 - AC B4-1: Orchestrator reads `review-findings.json` from the subagent's report
 - AC B4-2: Each finding classified using LLM reasoning with full story spec context
 - AC B4-3: `[FIX]`/`[SECURITY]`/`[TEST-FIX]` findings → orchestrator sends SendMessage to subagent: "Apply patches #N. Run tests. Report results."
@@ -277,18 +286,28 @@ The orchestrator and subagent overhead is minimal relative to workflow execution
 - AC B4-6: `[DESIGN]`/`[SPEC-AMEND]` findings → orchestrator presents to human in main session
 - AC B4-7: Human decision relayed to subagent via SendMessage
 - AC B4-8: `[DEFER]` findings → logged in orchestrator state, written to deferred-work file, no code changes
-- AC B4-9: After all findings handled, orchestrator sends SendMessage: "Run bmpipe --resume-from trace"
-- AC B4-10: Subagent runs trace, reports gate decision (PASS/CONCERNS/FAIL/WAIVED)
+
+*Any-step question handling (any workflow step):*
+- AC B4-9: When a subagent reports a question/pause from create-story, atdd, dev-story, or trace, the orchestrator reads the question and its context
+- AC B4-10: Orchestrator applies LLM reasoning to decide: can I answer this from the story spec, project context, and dependency graph? Or does this require human judgment?
+- AC B4-11: If orchestrator can answer → SendMessage the answer to the subagent, subagent continues execution
+- AC B4-12: If human needed → present question with full context in main session, wait for human response, relay via SendMessage
+- AC B4-13: All orchestrator-answered questions logged in the run state with the question, the answer given, and the reasoning — so the human can audit post-hoc
+
+*Completion flow:*
+- AC B4-14: After all findings/questions handled and pipeline completes, subagent reports final gate decision (PASS/CONCERNS/FAIL/WAIVED)
 
 **Files:** `workflow.md` (Steps 6-7 implementation)
 
 **Dev Notes:**
-- The classification prompt should include:
+- The classification prompt for review findings should include:
   - The finding text
   - The story spec (ACs)
   - The 6-category taxonomy with definitions
   - Instruction: "Classify this finding. If the fix would change what the AC literally states, classify as [SPEC-AMEND]. If the issue predates this story, classify as [DEFER]."
 - The SendMessage pattern for patch application must be specific: "Apply patches #3, #5, #12. Do NOT apply #1 (deferred) or #7 (spec-amend). Run tests after applying. Report pass/fail and any new failures."
+- For any-step questions: the orchestrator should NOT try to be smarter than the human. When in doubt, escalate. The log of orchestrator-answered questions is the safety net — if the orchestrator gives a bad answer, the human can catch it in the audit trail.
+- Key principle from Carlos: "there is no point in setting up strict deterministic rules for probabilistic behavior." The orchestrator uses LLM judgment, not if/else chains.
 
 ---
 
