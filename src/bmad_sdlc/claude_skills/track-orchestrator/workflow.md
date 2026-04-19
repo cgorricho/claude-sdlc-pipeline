@@ -1,8 +1,8 @@
 # BMPIPE Track Orchestrator — Workflow
 
-**Goal:** Orchestrate parallel BMAD story development across dependency tracks using `bmpipe run` as a primitive and tmux sessions for parallel execution.
+**Goal:** Orchestrate parallel BMAD story development across dependency tracks using `bmpipe run` as a primitive and Claude Code subagents for parallel execution.
 
-**Your Role:** The Track Orchestrator — read dependencies, plan parallelism, spawn tmux sessions, monitor, update state, escalate to humans when needed.
+**Your Role:** The Track Orchestrator — read dependencies, plan parallelism, spawn subagents, receive notifications, classify findings, coordinate fix cycles, update state, escalate to humans when needed.
 
 ---
 
@@ -11,10 +11,10 @@
 - NEVER modify BMAD workflows. They are the ground truth.
 - NEVER write to `sprint-status.yaml` directly. That file is owned by the BMAD workflows running inside bmpipe sessions.
 - DO write to `epics-and-stories.csv` after each story completes — you are the single writer.
-- DO respect the max concurrent tracks limit from `config.yaml` (default: 3).
+- DO respect the max concurrent subagents limit from config (default: 3).
 - DO stagger story launches by the configured delay (default: 8 seconds) to reduce sprint-status write collisions.
 - DO check that `bmpipe` is installed and on PATH before starting.
-- DO create `.orchestrator/` directory structure before spawning any sessions.
+- DO detect BMAD version before orchestrating (see SKILL.md § BMAD Version Detection).
 
 ---
 
@@ -22,17 +22,14 @@
 
 ### 1. Load configuration
 
-Load `config.yaml` from the skill's directory. Resolve:
-- `project.root` — project repo path
-- `bmpipe.bin` — bmpipe CLI binary (validate it's on PATH)
-- `state.sprint_status` — path to sprint-status.yaml
-- `state.dependency_csv` — path to epics-and-stories.csv
-- `parallel.max_concurrent_tracks` — max tmux sessions at once
-- `parallel.launch_stagger_seconds` — delay between spawns
-- `parallel.monitor_poll_interval_seconds` — how often to check sessions
-- `tmux.session_prefix` — tmux session naming prefix
-- `notifications.*` — which channels to use for human alerts
-- `retro.gate` — advisory or blocking
+Resolve from config and environment:
+- `project_root` — project repo path (auto-detect via `_bmad-output/` directory)
+- `bmpipe` CLI binary — validate it's on PATH
+- `sprint_status` — path to `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `epics_csv` — path to `_bmad-output/planning-artifacts/epics-and-stories.csv`
+- `max_concurrent` — max subagents at once (default: 3)
+- `launch_stagger_seconds` — delay between spawns (default: 8)
+- `retro.gate` — `advisory`, `blocking`, or `auto`
 
 ### 2. Validate environment
 
@@ -41,9 +38,6 @@ Run these checks before any orchestration:
 ```bash
 # bmpipe is installed
 which bmpipe || echo "ERROR: bmpipe not on PATH"
-
-# tmux is installed
-which tmux || echo "ERROR: tmux not on PATH"
 
 # Python 3 available
 which python3 || echo "ERROR: python3 not on PATH"
@@ -55,11 +49,9 @@ test -f _bmad-output/planning-artifacts/epics-and-stories.csv
 
 If any check fails, HALT and report the specific missing prerequisite.
 
-### 3. Create orchestrator state directories
+### 3. Detect BMAD version
 
-```bash
-mkdir -p .orchestrator/sentinels .orchestrator/logs .orchestrator/runs
-```
+Follow the 3-tier detection from SKILL.md § BMAD Version Detection. Record which tier was matched for use in later steps.
 
 ---
 
@@ -71,10 +63,10 @@ Based on user input, select one mode:
 |------|---------|----------|
 | `plan` | User says "what can run in parallel?" or "status" | Read state, identify runnable stories, report. No spawning. |
 | `run-epic` | User says "run Epic N" or "orchestrate Epic N" | Restrict to one epic. Plan + execute. |
-| `run-story` | User says "run story X-Y" | Force-run a single story in a single tmux session. |
+| `run-story` | User says "run story X-Y" | Force-run a single story in a single subagent. |
 | `run-all` | User says "run all" or "orchestrate everything" | Run all tracks, max concurrency. |
-| `monitor` | User says "check sessions" or "show status" | List running tmux sessions, their logs, any escalations. |
-| `kill` | User says "kill all" or "stop orchestration" | Kill all track sessions. |
+| `monitor` | User says "check status" or "show status" | Show per-subagent state, active steps, pending questions. |
+| `kill` | User says "kill all" or "stop orchestration" | Terminate all active subagents. |
 
 Default mode if unclear: `plan`.
 
@@ -84,29 +76,31 @@ Default mode if unclear: `plan`.
 
 <workflow>
 
-<step n="1" goal="Parse intent and determine mode">
+<step n="1" goal="Generate or read dependency graph">
 
-Ask the user if the mode is unclear. Default examples:
-- "Orchestrate Epic 1" → `run-epic` with epic=1
-- "Run stories 1.2 and 1.3 in parallel" → force-run two stories
-- "What's ready to run?" → `plan`
+Generate the dependency graph from epics + CSV. The graph identifies which stories can run in parallel and which must be sequential.
 
-Record `mode`, `target_epic` (if applicable), `target_stories` (if applicable).
+Input:
+- `_bmad-output/planning-artifacts/epics.md` (or sharded equivalent)
+- `_bmad-output/planning-artifacts/epics-and-stories.csv`
+
+Output:
+- `docs/epic-story-dependency-graph.md`
+
+Use `python3 helpers/state.py runnable` to identify stories with all dependencies met.
+
+If the graph already exists and source files haven't changed (mtime comparison), skip regeneration.
+
+<!-- Story B-2 fills in the full dependency graph generation logic -->
 
 </step>
 
 <step n="2" goal="Identify runnable stories">
 
-Use the state helper:
+Use the state helper to find stories ready for execution:
 
 ```bash
-python3 helpers/state.py runnable --epic {target_epic}
-```
-
-Or without filter:
-
-```bash
-python3 helpers/state.py runnable
+python3 helpers/state.py runnable [--epic {target_epic}]
 ```
 
 Parse the JSON output. Each entry has:
@@ -117,11 +111,7 @@ Parse the JSON output. Each entry has:
 - `current_status` — `backlog` or `ready-for-dev`
 - `dependencies_count` — 0 means independent
 
-<check if="runnable list is empty">
-  Report to user: "No stories are currently runnable. All dependencies not yet met, or all stories are in-progress/done."
-  Show summary via `python3 state.py summary`.
-  HALT.
-</check>
+If the runnable list is empty, report to user: "No stories are currently runnable. All dependencies not yet met, or all stories are in-progress/done." Show summary via `python3 helpers/state.py summary`. HALT.
 
 </step>
 
@@ -129,10 +119,10 @@ Parse the JSON output. Each entry has:
 
 Given the runnable stories, plan which to launch:
 
-1. **Apply max concurrency** — limit to `parallel.max_concurrent_tracks` from config (default 3)
+1. **Apply max concurrency** — limit to `max_concurrent` subagents (default 3)
 2. **Prefer dependency-rich stories first** — stories that unblock the most downstream work go first
-3. **Avoid shared-file conflicts** — check if any two runnable stories modify the same files (e.g., `package.json`, shared CSS, layout files). Do not run two stories that both modify the same file concurrently.
-4. **Group into tracks** — one tmux session per story (no sequential chains within a tmux session yet — Phase 3)
+3. **Avoid shared-file conflicts** — check if any two runnable stories modify the same files. Do not run two stories that both modify the same file concurrently. Phase 2: manual confirmation from user. Phase 3: automated detection from story specs.
+4. **Group into tracks** — one subagent per story
 
 Present the plan to the user:
 
@@ -153,171 +143,166 @@ WAIT for user confirmation before spawning.
 
 </step>
 
-<step n="4" goal="Spawn tmux sessions with stagger">
+<step n="4" goal="Spawn subagents">
 
 For each planned story, in order:
 
-1. Clean up any stale sentinels:
+1. Create a story branch (if per-story branching is enabled):
    ```bash
-   bash helpers/tmux.sh cleanup {track_id}
+   git checkout -b story/{story_id}
    ```
 
-2. Spawn the tmux session:
-   ```bash
-   bash helpers/tmux.sh spawn {track_id} {story_key} "bmpipe run --story {story_id}"
+2. Spawn a background subagent using the Agent tool:
    ```
-   Where `track_id` is a short identifier (e.g., `1-2`, `1-3`, `1-7`).
-
-3. Report the attach command:
-   ```
-   Track {track_id} started — attach: tmux attach-session -t {session_prefix}-{track_id}
+   Agent({
+     description: "Story {story_id}: {story_title}",
+     prompt: <subagent prompt template>,
+     run_in_background: true
+   })
    ```
 
-4. Wait `parallel.launch_stagger_seconds` (default 8) before launching next.
+3. Record the subagent ID, story_id, and launch time in orchestrator state.
 
-After all sessions spawn, enter monitoring loop.
+4. Wait `launch_stagger_seconds` (default 8) before launching next.
+
+After all subagents spawn, enter monitoring state — the orchestrator is notified natively when each subagent completes.
+
+<!-- Story B-3 fills in the subagent prompt template and spawning details -->
+<!-- Story B-6 fills in the per-story branching logic -->
 
 </step>
 
-<step n="5" goal="Monitor sessions and handle completions">
+<step n="5" goal="Receive subagent notifications and route">
 
-Every `parallel.monitor_poll_interval_seconds` (default 30), for each active track:
+The orchestrator is notified natively by Claude Code when each subagent completes or reports back. No polling required.
 
-1. Check if session is running:
-   ```bash
-   bash helpers/tmux.sh status {track_id}
-   ```
+For each subagent notification:
 
-2. Check if `.done` sentinel exists:
-   ```bash
-   bash helpers/tmux.sh check-done {track_id}
-   ```
+1. Read the subagent's report: `{story_id, exit_code, current_step, question_or_finding, findings_file}`
+2. Route by type:
+   - **Question/pause from any step** → Step 6 (classification/question handling)
+   - **Review findings** → Step 6 (finding classification)
+   - **Pipeline complete** → Step 8 (completion)
+   - **Pipeline failure** → Step 7 (error handling)
 
-3. If done, check exit code:
-   ```bash
-   bash helpers/tmux.sh check-exit {track_id}
-   ```
-
-4. Interpret exit code:
-   | Exit | Meaning | Action |
-   |------|---------|--------|
-   | 0 | Success | Mark story `done` in CSV; check for epic completion |
-   | 1 | Workflow failure | Alert human, mark story `blocked` (not in sprint-status, in orchestrator state) |
-   | 2 | Review max retries | Same as 1 |
-   | 3 | Human required (Mode B / [DESIGN]) | Alert human with tmux attach command |
-
-5. Check for `needs-human` sentinel (some escalations may write this mid-run):
-   ```bash
-   test -f .orchestrator/sentinels/{track_id}.needs-human && echo "HUMAN NEEDED"
-   ```
-
-6. Log state to `.orchestrator/runs/{timestamp}/status.log`.
-
-Show a periodic status board to the user:
+Show a periodic status display:
 
 ```
-[14:30:45] Orchestrator Status
-  Track 1-2: running      (elapsed 14m)
-  Track 1-3: running      (elapsed 14m)
-  Track 1-7: DONE         (exit 0, story marked done)
+Orchestrator Status
+  Subagent A (Story 1.2): running    — step: dev-story
+  Subagent B (Story 1.3): waiting    — needs: human decision on AC clarification
+  Subagent C (Story 1.7): complete   — exit 0, trace PASS
 
-  Completed: 1/3   Running: 2   Pending: 0
+  Completed: 1/3   Running: 1   Waiting: 1
 ```
+
+<!-- Story B-3 fills in the notification handling details -->
 
 </step>
 
-<step n="6" goal="On story completion, update CSV and re-plan">
+<step n="6" goal="Classify findings and handle questions">
 
-When a track reports exit code 0:
+The orchestrator's central decision-making step. Handles two types of subagent reports:
+
+**Review finding classification:**
+1. Read `review-findings.json` from the subagent's report
+2. Classify each finding using LLM reasoning with the 6-category taxonomy (see SKILL.md)
+3. Route by category:
+   - `[FIX]`/`[SECURITY]`/`[TEST-FIX]` → SendMessage to subagent: "Apply patches #N. Run tests. Report results."
+   - `[DESIGN]`/`[SPEC-AMEND]` → present to human in main session, relay decision via SendMessage
+   - `[DEFER]` → log, no action
+
+**Any-step question handling:**
+1. Read the question and its context from the subagent report
+2. Apply LLM reasoning: can I answer this from the story spec, project context, and dependency graph?
+   - Yes → SendMessage the answer to the subagent
+   - No → present to human, relay answer via SendMessage
+3. Log all orchestrator-answered questions for post-hoc audit
+
+If patches fail tests after SendMessage, retry up to `max_retries` (from config). After max retries, escalate to human.
+
+<!-- Story B-4 fills in the classification prompt, SendMessage patterns, and retry logic -->
+
+</step>
+
+<step n="7" goal="Resume trace after patches verified">
+
+After all findings are handled and patches verified:
+
+1. SendMessage to subagent: "Run `bmpipe run --story {id} --resume-from trace`"
+2. Subagent runs trace, reports gate decision: `{gate_decision, coverage, report_path}`
+3. Route by gate decision:
+   - PASS → Step 8 (completion)
+   - CONCERNS/FAIL → present to human, decide whether to proceed or investigate
+
+<!-- Story B-4 fills in the trace resumption details -->
+
+</step>
+
+<step n="8" goal="On story completion, update CSV and re-plan">
+
+When a subagent reports story completion (trace PASS):
 
 1. Update CSV:
    ```bash
    python3 helpers/state.py update-csv {story_id} Done
    ```
 
-2. Check for epic completion:
+2. If per-story branching is enabled, merge story branch to main:
+   ```bash
+   git checkout main && git merge story/{story_id}
+   ```
+   If merge conflicts arise, alert human — do NOT auto-resolve.
+
+3. Check for epic completion:
    ```bash
    python3 helpers/state.py epic-status {epic_id}
    ```
 
-3. If epic is complete (`all_done: true`) AND retrospective is pending:
-   - If `retro.gate: advisory` (default):
-     Print banner: "Epic {N} COMPLETE! Retrospective available: run `/bmad-retrospective`"
-     Continue with other work.
-   - If `retro.gate: blocking`:
-     Pause any new track spawning for this epic's descendants.
-     Print banner: "Epic {N} COMPLETE. Retro required before proceeding. Run `/bmad-retrospective`."
-     Wait for user to confirm retro is done.
+4. If epic is complete (`all_done: true`):
+   - `retro.gate: advisory` → print banner suggesting `/bmad-retrospective`, continue
+   - `retro.gate: blocking` → pause new spawning until human confirms retro is done
+   - `retro.gate: auto` → spawn a subagent to run `/bmad-retrospective`, wait for completion, proceed
 
-4. Re-identify runnable stories:
-   ```bash
-   python3 helpers/state.py runnable --epic {target_epic}
-   ```
+5. Re-identify runnable stories and spawn new subagents if slots available.
 
-5. If new stories are runnable AND current concurrent < max, spawn next story (with stagger).
+<!-- Story B-5 fills in the completion and re-planning details -->
+<!-- Story B-6 fills in the branch merge details -->
 
 </step>
 
-<step n="7" goal="On human escalation, alert and continue">
+<step n="9" goal="Repeat until epic/project complete">
 
-When a track reports exit code 3 (or `needs-human` sentinel detected):
+Continue the spawn → notify → classify → complete loop until:
+- All planned stories are done, OR
+- All remaining stories are human-blocked, OR
+- User requests stop
 
-1. Print banner in orchestrator pane (if `notifications.tmux_banner: true`):
-   ```
-   HUMAN REVIEW NEEDED
-   Story: {story_id} ({story_title})
-   Reason: bmpipe exited with code 3
-   Attach to session: tmux attach-session -t {session_prefix}-{track_id}
-   Log: .orchestrator/logs/{track_id}.log
-   ```
-
-2. Ring terminal bell if `notifications.terminal_bell: true`:
-   ```bash
-   echo -e '\a'
-   ```
-
-3. Desktop notification if `notifications.desktop: true` and `notify-send` available:
-   ```bash
-   notify-send "Track Orchestrator" "Story {story_id} needs human review" 2>/dev/null || true
-   ```
-
-4. Mark this track as `human-blocked` in orchestrator state (NOT sprint-status — it uses BMAD statuses only).
-
-5. Continue monitoring other tracks — this story is paused, not the whole orchestration.
-
-6. User resolves by:
-   - Attaching to the tmux session
-   - Handling the review in that Claude Code session
-   - When bmpipe signals it's ready to resume, run `bmpipe --resume` in that session
-   - Session eventually writes `.done` sentinel with updated exit code
+On each iteration, re-evaluate the dependency graph to find newly unblocked stories.
 
 </step>
 
-<step n="8" goal="Final reporting">
+<step n="10" goal="Final report">
 
-When all planned tracks have reached exit code 0 (or human-blocked):
-
-Print summary:
+When all planned tracks have reached completion (or human-blocked):
 
 ```
 Orchestration Complete
 
-  Stories completed:    {N}
+  Stories completed:     {N}
   Stories human-blocked: {M}
-  Stories failed:       {K}
-  Wall-clock time:      {HH:MM:SS}
-  
-  CSV updated:          {list of story_ids set to Done}
-  Epic(s) completed:    {list} (retrospective {status})
-  
+  Stories failed:        {K}
+  Wall-clock time:       {HH:MM:SS}
+
+  CSV updated:           {list of story_ids set to Done}
+  Epic(s) completed:     {list} (retrospective {status})
+
   Next steps:
     - Review completed stories via sprint-status.yaml
-    - Handle any human-blocked tracks
+    - Handle any human-blocked stories
     - Run /bmad-retrospective for completed epics (if advisory gate)
     - Re-invoke this skill to orchestrate next tracks
 ```
-
-Save a run log to `.orchestrator/runs/{timestamp}/summary.md`.
 
 </step>
 
@@ -330,15 +315,15 @@ Save a run log to `.orchestrator/runs/{timestamp}/summary.md`.
 In Phase 2, the orchestrator deliberately limits itself:
 
 1. **One epic at a time** by default (pass `--epic N` to state.py when planning)
-2. **One story per tmux session** — no sequential chains within a session
+2. **One story per subagent** — no sequential chains within a subagent
 3. **Manual shared-file awareness** — the user confirms no conflicts before proceeding
 4. **Advisory retro gate only** — no blocking behavior
 5. **No automatic dependency re-evaluation for cross-epic** — user re-invokes the skill after each epic
 
 Phase 3 will add:
 - Cross-epic planning
-- Sequential chains within tmux sessions
-- Automated shared-file conflict detection
+- Sequential chains within subagents
+- Automated shared-file conflict detection from story specs
 - Configurable blocking retro gates
 
 ---
@@ -347,11 +332,12 @@ Phase 3 will add:
 
 | Situation | Response |
 |-----------|----------|
-| bmpipe not on PATH | HALT, ask user to install or configure `bmpipe.bin` |
-| tmux not available | HALT, ask user to install tmux |
+| bmpipe not on PATH | HALT, ask user to install or configure bmpipe |
 | sprint-status.yaml corrupted | Suggest running `/bmad-sprint-planning` to regenerate |
 | CSV write conflict (shouldn't happen — single writer) | Retry once, then report to user |
-| Tmux session hangs (no output for 2x configured timeout) | Print warning, offer to kill session |
-| Max retries exceeded by bmpipe | Report to user as if exit 2 — needs investigation |
-
-Always preserve tmux sessions on errors (don't auto-kill) — the user may want to attach and investigate.
+| Subagent fails to spawn | Report to user, continue with remaining tracks |
+| Subagent reports exit 1 (workflow failure) | Alert human, mark story blocked in orchestrator state |
+| Subagent reports exit 2 (review retries exhausted) | Alert human, offer to attach and investigate |
+| Subagent reports exit 3 (human judgment needed) | Present question/context in main session, relay answer via SendMessage |
+| Max retries exceeded for patch application | Escalate to human with full context |
+| BMAD installation not detected | HALT with clear error message (see SKILL.md § BMAD Version Detection) |

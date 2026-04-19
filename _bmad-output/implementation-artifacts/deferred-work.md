@@ -24,3 +24,10 @@
 ## From Story A-4 — Safety Heuristic and Orchestrator Wiring
 
 - **`_CATEGORY_TO_SUMMARY_KEY` in contracts.py excludes `[NOTE]`**: The summary dict in `parse_review_findings_json()` has no `note` key, so `[NOTE]` findings count toward `total_findings` but have no corresponding summary entry. Pre-existing from A-2, not introduced by A-4.
+
+## From Story B-1 — Skill Rewrite (SKILL.md and Workflow Foundation)
+
+- **Classification taxonomy duplication risk**: SKILL.md embeds a static copy of the 6-category taxonomy table. If categories or rules change in `orchestrator.py` (A-3/A-4), the SKILL.md copy will drift. Consider a single-source-of-truth approach when B-4 implements classification.
+- **Subagent failure timeout**: No mechanism for detecting subagents that die silently, hang indefinitely, or produce no notification. B-3 should add a timeout or health-check fallback.
+- **Per-story branching race condition**: Steps 4 and 8 use `git checkout` which changes the shared working directory under all subagents. B-6 must use git worktrees or separate clones instead of checkout-based branching.
+- **Retro subagent timeout**: `retro.gate: auto` spawns a retrospective subagent with no timeout or failure path. B-5 should add error handling for retro subagent hangs/failures.
