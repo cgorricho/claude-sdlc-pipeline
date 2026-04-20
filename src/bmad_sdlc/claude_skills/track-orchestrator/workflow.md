@@ -356,40 +356,267 @@ The orchestrator remains in this step as long as subagents are active. The loop 
 
 <step n="6" goal="Classify findings and handle questions">
 
-The orchestrator's central decision-making step. Handles two types of subagent reports:
+The orchestrator's central decision-making step. Route by the subagent's `report_type`:
+- `"question"` → go to 6.2 (question handling)
+- `"complete"` with `findings_file` → go to 6.1 (finding classification)
 
-**Review finding classification:**
-1. Read `review-findings.json` from the subagent's report
-2. Classify each finding using LLM reasoning with the 6-category taxonomy (see SKILL.md)
-3. Route by category:
-   - `[FIX]`/`[SECURITY]`/`[TEST-FIX]` → SendMessage to subagent: "Apply patches #N. Run tests. Report results."
-   - `[DESIGN]`/`[SPEC-AMEND]` → present to human in main session, relay decision via SendMessage
-   - `[DEFER]` → log, no action
+### 6.1 Review finding classification
 
-**Any-step question handling:**
-1. Read the question and its context from the subagent report
-2. Apply LLM reasoning: can I answer this from the story spec, project context, and dependency graph?
-   - Yes → SendMessage the answer to the subagent
-   - No → present to human, relay answer via SendMessage
-3. Log all orchestrator-answered questions for post-hoc audit
+When a subagent report includes `findings_file`, read the findings and classify each one.
 
-If patches fail tests after SendMessage, retry up to `max_retries` (from config). After max retries, escalate to human.
+**6.1.1 Read findings**
 
-<!-- Story B-4 fills in the classification prompt, SendMessage patterns, and retry logic -->
+Read the `review-findings.json` file from the path in the subagent's report. Also read the story's spec file to have the acceptance criteria available for classification context. If the spec file is not found, warn in the main session ("Spec file not found for Story {story_id} — classifying without AC context") and proceed with classification using only the finding text and taxonomy.
+
+If the findings file is empty or contains zero findings, skip classification entirely and proceed to Step 7 for trace resumption.
+
+**6.1.2 Classify each finding**
+
+For each finding, apply LLM reasoning using this classification prompt:
+
+```
+I need to classify the following review finding for Story {story_id}.
+
+## Finding #{finding_number}
+{finding_text}
+
+## Story Acceptance Criteria
+{acceptance_criteria from the story spec}
+
+## Classification Taxonomy
+
+| Category | Meaning | Action |
+|----------|---------|--------|
+| [FIX] | Code bug, trivially fixable, no judgment needed | Auto-apply |
+| [SECURITY] | Defense-in-depth hardening, always apply | Auto-apply |
+| [TEST-FIX] | Test code improvement, not production code | Auto-apply |
+| [DEFER] | Real issue, not this story's scope | Log, no action |
+| [SPEC-AMEND] | Fix is trivial but changes the spec's intent | Escalate to human |
+| [DESIGN] | Architectural decision, requires human judgment | Escalate to human |
+
+## Disambiguation Rules
+- If the fix would change what an acceptance criterion literally states → [SPEC-AMEND]
+- If the issue predates this story (existed before this change) → [DEFER]
+- If the fix requires choosing between multiple valid architectural approaches → [DESIGN]
+- If it's a clear bug with exactly one correct fix → [FIX]
+- If it hardens security without changing behavior → [SECURITY]
+- If it only affects test code → [TEST-FIX]
+
+Classify this finding into exactly one category. State the category and a one-sentence justification.
+```
+
+Collect all classifications into a summary table before acting:
+
+```
+Finding Classification Summary (Story {story_id})
+  #1: [FIX]      — Missing null check in handler
+  #2: [DEFER]    — Pre-existing logging gap, not from this story
+  #3: [SECURITY] — Input sanitization hardening
+  #4: [SPEC-AMEND] — Would change AC-3's expected behavior
+  #5: [FIX]      — Off-by-one in pagination
+
+  Auto-apply: #1, #3, #5
+  Escalate:   #4
+  Defer:      #2
+```
+
+**6.1.3 Route by category**
+
+**Auto-apply categories** (`[FIX]`, `[SECURITY]`, `[TEST-FIX]`):
+
+SendMessage to the subagent with specific instructions:
+
+```
+SendMessage to subagent {subagent_id}:
+
+Apply the following review findings and re-run tests:
+
+APPLY these findings:
+- Finding #1: [FIX] — {brief description}
+- Finding #3: [SECURITY] — {brief description}
+- Finding #5: [FIX] — {brief description}
+
+DO NOT apply these findings (they are deferred or escalated):
+- Finding #2: [DEFER] — will be addressed in a future story
+- Finding #4: [SPEC-AMEND] — requires human decision on spec change
+
+After applying patches:
+1. Run the project's test suite
+2. Report back with:
+   - report_type: "complete"
+   - detail: "Patches applied: #1, #3, #5. Tests: PASS/FAIL. New failures: {list or none}"
+```
+
+Update subagent state to `running` after sending.
+
+**Escalation categories** (`[DESIGN]`, `[SPEC-AMEND]`):
+
+Present to the human in the main session:
+
+```
+━━━ Human Decision Required ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Story {story_id}: {story_title}
+
+Finding #{N}: [{CATEGORY}]
+{finding_text}
+
+{For SPEC-AMEND: "This fix would change what AC-{N} literally states.
+The current AC says: {ac_text}
+The proposed fix would make it: {proposed_change}"}
+
+{For DESIGN: "This requires choosing an architectural approach.
+Options identified: {options}"}
+
+How should I proceed?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+HALT and wait for human response. Once the human decides, relay the decision to the subagent via SendMessage. Update subagent state from `needs-human` to `running`. After the escalation is resolved, continue processing any remaining findings.
+
+**Deferred category** (`[DEFER]`):
+
+Append to the project's deferred-work file (`_bmad-output/implementation-artifacts/deferred-work.md`):
+
+```
+## From Story {story_id} — {story_title} (orchestrator-deferred)
+
+- **{brief description}**: {finding_text}. Surfaced during code review, classified as pre-existing or out-of-scope for this story.
+```
+
+No SendMessage to subagent for deferred findings — no code action needed.
+
+**6.1.4 Retry loop for patch failures**
+
+If the subagent reports that tests FAIL after applying patches:
+
+1. Increment the retry counter for this story (per-story scope, initialized to 0 when first entering 6.1.4 for this story)
+2. If retries < `max_retries` (from config, default 3):
+   - SendMessage to subagent: "Tests failed after applying patches. Here are the failing tests: {test failure output from subagent report}. Review the failures, adjust the patches to fix the test regressions, and re-run the full test suite. Report results."
+   - Update subagent state to `running`
+   - Return to monitoring (Step 5) — the subagent will report back
+3. If retries >= `max_retries`:
+   - Update subagent state to `needs-human`
+   - Present to human:
+     ```
+     ━━━ Retry Limit Reached ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Story {story_id}: Patches failed tests after {max_retries} attempts.
+     Last failure: {failure_details}
+
+     Options:
+     [I] Investigate — I'll look at the failures manually
+     [S] Skip patches — proceed to trace without the fixes
+     [A] Abandon — mark story as failed
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     ```
+   - HALT and wait for human decision:
+     - **[I]**: Update state to `needs-human`. Human investigates and tells the orchestrator when to proceed. Relay instructions via SendMessage.
+     - **[S]**: SendMessage to subagent: "Revert the failed patches. Do not apply review fixes." Proceed to Step 7 for trace resumption.
+     - **[A]**: Update subagent state to `failed`. Return to monitoring (Step 5).
+
+**6.1.5 Post-classification flow**
+
+After all findings have been classified and routed:
+- If any auto-apply patches were sent, wait for the subagent's patch report before proceeding. After patches are verified (or retry loop resolves), proceed to Step 7.
+- If no auto-apply patches were needed (all findings were [DEFER], or all escalations resolved without code changes), proceed directly to Step 7.
+
+### 6.2 Any-step question handling
+
+When a subagent reports `report_type: "question"` from any pipeline step (create-story, atdd, dev-story, code-review, or trace):
+
+**6.2.1 Read and assess the question**
+
+Read the question from the subagent's `detail` field and the `current_step` that produced it.
+
+Apply LLM reasoning to decide if the orchestrator can answer:
+
+The orchestrator should answer ONLY if ALL of these are true:
+1. The answer is derivable from the story spec, project context, or dependency graph
+2. The answer has exactly one reasonable interpretation — no ambiguity
+3. The answer does not change scope, architecture, or spec intent
+
+Otherwise, escalate to human. **When in doubt, escalate.**
+
+**6.2.2 Orchestrator answers**
+
+If the orchestrator can answer:
+
+1. Formulate the answer based on the story spec, project context, and dependency graph
+2. SendMessage to the subagent:
+   ```
+   SendMessage to subagent {subagent_id}:
+
+   Answer to your question from step {current_step}:
+   {answer}
+
+   Continue the pipeline with this answer.
+   ```
+3. Update subagent state to `running`
+4. **Log the answer for audit:**
+   ```
+   Orchestrator Answer Log (Story {story_id})
+     Step: {current_step}
+     Question: {question_text}
+     Answer: {answer}
+     Reasoning: {why this was answerable without human input}
+     Timestamp: {now}
+   ```
+   Display this log entry in the main session so the human can see it. This is the safety net — if the orchestrator gives a bad answer, the human can catch it here.
+
+**6.2.3 Human escalation**
+
+If the question requires human judgment:
+
+1. Update subagent state to `needs-human`
+2. Present to the human:
+   ```
+   ━━━ Question from Story {story_id} ━━━━━━━━━━━━━━━━━━━━━━━━
+   Pipeline step: {current_step}
+
+   {question_text}
+
+   Context: {any additional context from the subagent report}
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ```
+3. HALT and wait for human response
+4. Relay the human's answer via SendMessage to the subagent
+5. Update subagent state to `running`
 
 </step>
 
 <step n="7" goal="Resume trace after patches verified">
 
-After all findings are handled and patches verified:
+After all findings have been classified, auto-fix patches applied and verified, and any escalated items resolved:
 
-1. SendMessage to subagent: "Run `bmpipe run --story {id} --resume-from trace`"
-2. Subagent runs trace, reports gate decision: `{gate_decision, coverage, report_path}`
-3. Route by gate decision:
-   - PASS → Step 8 (completion)
-   - CONCERNS/FAIL → present to human, decide whether to proceed or investigate
+### 7.1 Send trace resumption
 
-<!-- Story B-4 fills in the trace resumption details -->
+SendMessage to the subagent:
+
+```
+SendMessage to subagent {subagent_id}:
+
+All review findings have been handled. Resume the pipeline from the trace step:
+
+```bash
+bmpipe run --story {story_id} --resume-from trace
+```
+
+After trace completes, report back with:
+- report_type: "complete"
+- detail: Include the gate decision (PASS/CONCERNS/FAIL/WAIVED), coverage summary, and path to the traceability report
+```
+
+Update subagent `current_step` to `trace`.
+
+### 7.2 Route gate decision
+
+When the subagent reports back from trace:
+
+| Gate Decision | Action |
+|---------------|--------|
+| **PASS** | Story is complete. Proceed to Step 8 (CSV update, re-planning). |
+| **WAIVED** | Human previously waived the gate. Proceed to Step 8 with a note. |
+| **CONCERNS** | Present concerns to human with the traceability report path. HALT. Human decides: `[P] Proceed anyway` or `[I] Investigate`. On P → Step 8. On I → update subagent state to `needs-human`, wait for human resolution. |
+| **FAIL** | Present failure details to human. HALT. Human decides: `[R] Re-run trace after fixes` (SendMessage to subagent to retry) or `[W] Waive and proceed` (Step 8 with waiver note) or `[A] Abandon` (mark story failed). |
 
 </step>
 
