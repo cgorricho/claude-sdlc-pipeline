@@ -375,28 +375,103 @@ This gives the orchestrator the BMad Master's practical effectiveness (concise, 
 
 ---
 
-### Story B-7: Phase 1 Validation — Single Story End-to-End
+### Story B-7: Prep Tasks — Non-Story Work Running Alongside Stories
 
-**What:** Run one story through the complete subagent lifecycle on a real BMAD project to validate the architecture works end-to-end. This is not a code story — it's a validation story that exercises the skill.
+**What:** Add support for prep tasks — subagents that run custom commands (not `bmpipe run --story`), have deadline-before dependencies tied to specific stories, and verify completion via custom commands. This enables orchestrating infrastructure setup, CI wiring, migration runs, and other non-story work in parallel with story development.
+
+**Source:** `docs/learnings-epic-1-retro.md` Learning 1 — Docker + Supabase CI wiring needed to run alongside Epic 2 stories with a hard deadline before Story 2.7.
 
 **ACs:**
-- AC B7-1: Single story goes from `backlog` → `done` via the orchestrator skill
-- AC B7-2: Subagent successfully invokes `bmpipe run --stop-after review`
-- AC B7-3: Orchestrator successfully classifies findings using 6-category taxonomy
-- AC B7-4: SendMessage successfully relays patch instructions to subagent
-- AC B7-5: Subagent successfully resumes with `--resume-from trace`
-- AC B7-6: CSV updated, sprint-status reflects completion
-- AC B7-7: Token usage logged — verify orchestrator overhead matches expected 5-20% range
-- AC B7-8: No context window exhaustion during the run
-- AC B7-9: Story branch created, used, merged, and deleted successfully
+- AC B7-1: Orchestrator config supports a `prep_tasks` section with: id, description, command, verify, deadline_before (story ID that this task must complete before)
+- AC B7-2: Prep task subagents spawned alongside story subagents during Step 4 (spawning)
+- AC B7-3: Prep task subagent runs the configured `command` (not `bmpipe run`)
+- AC B7-4: On completion, orchestrator runs the `verify` command to confirm success
+- AC B7-5: If verify fails, orchestrator alerts human — prep task is not considered done
+- AC B7-6: Stories with `deadline_before` dependency on a prep task are blocked until that prep task verifies successfully
+- AC B7-7: Prep task status tracked in orchestrator state alongside story states (running, completed, failed, verified)
+- AC B7-8: Dependency graph generation (B-2) includes prep tasks as nodes — stories that depend on them are placed in later layers
+
+**Files:** `workflow.md` (Steps 3, 4, 5, 8 enhancements), `helpers/state.py` (prep task parsing)
+
+**Dev Notes:**
+- Prep tasks are NOT stories — they don't have story files, don't follow the 5-step cycle, don't produce review-findings.json
+- The subagent prompt for a prep task is simpler: "Run this command. Report stdout/stderr and exit code."
+- Example from Atlas Epic 2:
+  ```yaml
+  prep_tasks:
+    - id: docker-ci-wiring
+      description: "Wire Docker + Supabase into GitHub Actions for INT tests"
+      command: "bmpipe setup-ci --docker"
+      verify: "npm run test:int -- --ci"
+      deadline_before: "2.7"
+  ```
+- The `deadline_before` field creates an implicit dependency: Story 2.7 cannot be spawned until prep task `docker-ci-wiring` has verified=true
+- Multiple prep tasks can run in parallel (they count toward max_concurrent)
+- A prep task can depend on another prep task (chain: docker-ci-wiring → run-deferred-int-tests → unblock 2.7)
+
+---
+
+### Story B-8: Cross-Epic Preconditions
+
+**What:** Add support for gates that block specific stories until conditions from earlier epics are proven. This enables the orchestrator to enforce "Epic 1's 33 INT tests must pass before Epic 2 Story 2.7 starts" without human memory.
+
+**Source:** `docs/learnings-epic-1-retro.md` Learning 3 — 33 deferred P0 INT tests from Epic 1 must pass against Docker + Supabase before Epic 2 reaches Story 2.7.
+
+**ACs:**
+- AC B8-1: Orchestrator config supports a `preconditions` section with: gate (ID), description, verify (command), blocks_before (story ID), depends_on (optional prep task ID)
+- AC B8-2: Before spawning a story's subagent, orchestrator checks all preconditions that `blocks_before` that story
+- AC B8-3: If a precondition hasn't been verified, orchestrator runs the `verify` command
+- AC B8-4: If verify passes → precondition satisfied, proceed with story
+- AC B8-5: If verify fails → orchestrator checks `depends_on`. If the dependency (prep task) isn't done yet, block the story silently (it will be retried after the prep task completes)
+- AC B8-6: If verify fails AND no dependency or dependency is done → alert human: "Precondition {gate} failed. Story {id} is blocked."
+- AC B8-7: Precondition status tracked in orchestrator state: unchecked, checking, satisfied, failed, blocked-by-dep
+- AC B8-8: Re-planning (Step 8) re-checks preconditions for blocked stories after prep tasks complete
+
+**Files:** `workflow.md` (Steps 3, 4, 8 enhancements), `helpers/state.py` (precondition parsing + verification)
+
+**Dev Notes:**
+- Example from Atlas:
+  ```yaml
+  preconditions:
+    - gate: "epic-1-int-tests-green"
+      description: "All 33 deferred Epic 1 INT tests pass against Docker + Supabase"
+      verify: "npx vitest run tests/acceptance/story-1-{3,4,5,6}*.test.ts"
+      blocks_before: "2.7"
+      depends_on: "docker-ci-wiring"
+  ```
+- Preconditions are checked BEFORE story spawning (in Step 4), not during execution
+- If a precondition depends on a prep task (`depends_on`), the orchestrator knows to wait for the prep task first — don't waste time running verify before the infrastructure is ready
+- A story can have multiple preconditions. ALL must pass before spawning.
+- Cross-epic preconditions are the final piece that enables the orchestrator to manage multi-epic projects autonomously — the human defines the gates upfront, the orchestrator enforces them at runtime
+
+---
+
+### Story B-9: Phase 1 Validation — End-to-End on Real Project
+
+**What:** Run stories through the complete orchestrator lifecycle on a real BMAD project to validate the architecture works end-to-end. This is not a code story — it's a validation story that exercises the skill.
+
+**ACs:**
+- AC B9-1: Single story goes from `backlog` → `done` via the orchestrator skill
+- AC B9-2: Subagent successfully invokes `bmpipe run`
+- AC B9-3: Orchestrator successfully classifies findings using 6-category taxonomy
+- AC B9-4: SendMessage successfully relays patch instructions to subagent
+- AC B9-5: Subagent successfully resumes with `--resume-from trace`
+- AC B9-6: CSV updated, sprint-status reflects completion
+- AC B9-7: Token usage logged — verify orchestrator overhead matches expected 5-20% range
+- AC B9-8: No context window exhaustion during the run
+- AC B9-9: Story branch created, used, merged, and deleted successfully
+- AC B9-10: Prep task subagent runs alongside a story subagent (if applicable)
+- AC B9-11: Precondition gate blocks a story until verification passes (if applicable)
+- AC B9-12: Layer-derived parallelism correctly auto-serializes and auto-parallelizes
 
 **Files:** No code changes — this is a validation run. Findings from this run may produce follow-up stories.
 
 **Dev Notes:**
 - This should be run against a real BMAD project with a real story (not bmad-sdlc itself)
-- The Atlas project is the most likely candidate
+- The Atlas project is the most likely candidate — Epic 2 has both prep tasks and cross-epic preconditions
 - Document all observations — timing, token usage, failure modes, human intervention points
-- This story's outcome determines whether Phase 2 (parallel stories) is ready
+- This story's outcome determines whether Phase 2 (parallel stories within an epic) is ready
+- Start with `--max 1` to validate single-story flow, then test with 2-3 concurrent
 
 ---
 
@@ -409,13 +484,17 @@ B-3 (subagent spawning)     → depends on B-1
 B-4 (classification + fix)  → depends on B-3
 B-5 (completion + replan)   → depends on B-4
 B-6 (per-story branches)    → depends on B-3
-B-7 (Phase 1 validation)    → depends on B-4, B-5, B-6 (all must be complete)
+B-7 (prep tasks)            → depends on B-5 (uses spawning + re-planning infrastructure)
+B-8 (cross-epic precon.)    → depends on B-7 (prep tasks must exist for depends_on)
+B-9 (Phase 1 validation)    → depends on B-5, B-6, B-7, B-8 (all must be complete)
 ```
 
 B-2 and B-3 can run in parallel after B-1.
 B-4 and B-6 can run in parallel after B-3.
 B-5 depends on B-4.
-B-7 is the integration test — runs last.
+B-7 depends on B-5 (prep tasks use the spawning and re-planning loop).
+B-8 depends on B-7 (preconditions reference prep tasks via `depends_on`).
+B-9 is the integration test — runs last, validates everything.
 
 ---
 
@@ -446,9 +525,12 @@ Gaps 1-8 are addressed by Epic A. This epic consumes the 6-category taxonomy fro
 
 ## 8. What This Epic Does NOT Do
 
-- Does not implement cross-epic parallelism (Phase 3)
-- Does not implement automated file ownership detection from story specs (Phase 3)
+- Does not implement automated file ownership detection from story specs (Phase 3 — manual check in B-3)
 - Does not implement sequential chains within a subagent (Phase 3 — multiple stories per subagent)
 - Does not implement the observability dashboard (separate initiative — see `design-observability-layer.md`)
 - Does not implement 3-layer parallel review (Blind Hunter + Edge Case Hunter + Acceptance Auditor) — the review is still a single Claude session inside `bmpipe`. Multi-agent review is a separate initiative.
 - Does not change `bmpipe` Python code (except consuming what Epic A delivers) — all orchestration logic is in the Claude Code skill, not in Python
+
+**Now covered by this epic (previously listed as not-done):**
+- Cross-epic preconditions (B-8) — gates from previous epics blocking specific stories
+- Prep tasks (B-7) — non-story work running alongside story development
