@@ -133,86 +133,224 @@ If the runnable list is empty, report to user: "No stories are currently runnabl
 
 <step n="3" goal="Plan parallel tracks">
 
-Given the runnable stories, plan which to launch:
+Given the runnable stories from Step 2, build the execution plan:
 
-1. **Apply max concurrency** — limit to `max_concurrent` subagents (default 3)
-2. **Prefer dependency-rich stories first** — stories that unblock the most downstream work go first
-3. **Avoid shared-file conflicts** — check if any two runnable stories modify the same files. Do not run two stories that both modify the same file concurrently. Phase 2: manual confirmation from user. Phase 3: automated detection from story specs.
-4. **Group into tracks** — one subagent per story
+### 3.1 Select stories to launch
 
-Present the plan to the user:
+1. **Sort by downstream impact** — count how many other stories (directly or transitively) depend on each runnable story. Launch the ones that unblock the most work first.
+2. **Apply max concurrency** — take at most `max_concurrent` stories (default 3). If more stories are runnable than slots available, the remainder waits for a slot to free up.
+3. **Check for shared-file conflicts** — present the selected stories and ask the user:
+
+   ```
+   These stories are planned for parallel execution:
+     Track 1: Story {story_id} — {story_title}
+     Track 2: Story {story_id} — {story_title}
+     Track 3: Story {story_id} — {story_title}
+
+   Do any of these stories modify the same files? If yes, tell me
+   which pair conflicts and I'll sequentialize them.
+   ```
+
+   If the user reports a conflict, move the lower-priority story (fewer downstream dependents) out of this batch and into the waiting queue. Re-present the revised plan.
+
+### 3.2 Present final plan
 
 ```
-Planned parallel execution:
-  Track 1: Story {id} ({title})
-  Track 2: Story {id} ({title})
-  Track 3: Story {id} ({title})
+Execution Plan
+  Track 1: Story {story_id} — {story_title}
+  Track 2: Story {story_id} — {story_title}
 
-Each track runs: bmpipe run --story {id}
-Stagger: 8 seconds between launches
-Max concurrent: 3
+  Pipeline command: bmpipe run --story {id}
+  Launch stagger:   {launch_stagger_seconds}s between spawns
+  Max concurrent:   {max_concurrent}
+  Remaining queued: {N} stories (will launch as slots free)
 
-Proceed? (yes/no)
+Proceed? [Y]es / [N]o
 ```
 
-WAIT for user confirmation before spawning.
+HALT — wait for user confirmation before spawning. If user says no, return to Step 2 for re-planning.
 
 </step>
 
 <step n="4" goal="Spawn subagents">
 
-For each planned story, in order:
+For each story in the approved plan, in order:
 
-1. Create a story branch (if per-story branching is enabled):
+### 4.1 Pre-spawn setup (per story)
+
+1. If per-story branching is enabled (Story B-6):
    ```bash
    git checkout -b story/{story_id}
    ```
+   <!-- Story B-6 fills in the per-story branching logic -->
 
-2. Spawn a background subagent using the Agent tool:
+### 4.2 Subagent prompt template
+
+Use this template for every subagent, substituting `{story_id}`, `{story_key}`, and `{story_title}`:
+
+```
+You are a story executor for the BMPIPE Track Orchestrator.
+
+## Your Assignment
+
+- **Story ID:** {story_id}
+- **Story Key:** {story_key}
+- **Story Title:** {story_title}
+
+## Instructions
+
+Run the full BMAD development pipeline for this story:
+
+```bash
+bmpipe run --story {story_id}
+```
+
+Monitor the exit code and report back to the orchestrator IMMEDIATELY using this structure:
+
+### If bmpipe exits 0 (success):
+Report:
+- report_type: "complete"
+- story_id: "{story_id}"
+- exit_code: 0
+- current_step: "done"
+- detail: Brief summary of what was completed
+- findings_file: Path to review-findings.json if it exists (check .bmpipe/runs/{story_key}/)
+
+### If bmpipe exits 3 (human judgment needed):
+Report IMMEDIATELY — do NOT wait or attempt to answer:
+- report_type: "question"
+- story_id: "{story_id}"
+- exit_code: 3
+- current_step: Which pipeline step paused (create-story, atdd, dev-story, code-review, trace). If output is empty, set to "unknown".
+- detail: The EXACT question or context that caused the pause — copy it verbatim from bmpipe output. If output is empty, set to "No output captured — bmpipe exited 3 with no message."
+- findings_file: Check .bmpipe/runs/{story_key}/review-findings.json — include path if it exists, null otherwise
+
+### If bmpipe exits 1 or 2 (failure):
+Report:
+- report_type: "failure"
+- story_id: "{story_id}"
+- exit_code: {actual exit code}
+- current_step: Which step failed (parse from bmpipe output). If output is empty, set to "unknown".
+- detail: Last relevant output lines showing what went wrong. If output is empty, set to "No output captured — bmpipe exited {exit_code} with no message."
+
+## Critical Rules
+
+- NEVER attempt to answer workflow questions yourself — always report back to the orchestrator
+- NEVER modify files outside the scope of your assigned story
+- NEVER write to epics-and-stories.csv — the orchestrator owns that file
+- If bmpipe asks you a question during execution, report it back with report_type "question" — the orchestrator will relay the answer via SendMessage
+- When you receive a SendMessage from the orchestrator, follow its instructions exactly
+```
+
+### 4.3 Spawn sequence
+
+For each story in the plan:
+
+1. Spawn the subagent:
    ```
    Agent({
      description: "Story {story_id}: {story_title}",
-     prompt: <subagent prompt template>,
+     prompt: <filled template from 4.2>,
      run_in_background: true
    })
    ```
 
-3. Record the subagent ID, story_id, and launch time in orchestrator state.
+2. Record in orchestrator state:
+   - **subagent_id**: the ID returned by the Agent tool
+   - **story_id**: the story being executed
+   - **story_key**: the full sprint-status key
+   - **state**: `running`
+   - **current_step**: `starting`
+   - **launch_time**: current timestamp
+   - **pending_question**: null
 
-4. Wait `launch_stagger_seconds` (default 8) before launching next.
+3. If this is NOT the last story in the plan, wait `launch_stagger_seconds` (default 8) before spawning the next:
+   ```bash
+   sleep {launch_stagger_seconds}
+   ```
 
-After all subagents spawn, enter monitoring state — the orchestrator is notified natively when each subagent completes.
+4. After all subagents are spawned, proceed to Step 5 (monitoring).
 
-<!-- Story B-3 fills in the subagent prompt template and spawning details -->
-<!-- Story B-6 fills in the per-story branching logic -->
+### 4.4 Orchestrator state model
+
+Track all active subagents in this structure (in-memory, not persisted):
+
+```
+active_subagents = [
+  {
+    subagent_id: "<from Agent tool>",
+    story_id: "1.2",
+    story_key: "1-2-design-token-foundation",
+    state: "running" | "paused" | "needs-human" | "completed" | "failed",
+    current_step: "starting" | "create-story" | "atdd" | "dev-story" | "code-review" | "trace" | "done",
+    launch_time: "<timestamp>",
+    pending_question: null | "<the question text>"
+  },
+  ...
+]
+```
+
+State transitions:
+- `running` → `paused` (subagent reports question, orchestrator can answer)
+- `running` → `needs-human` (subagent reports question, requires human)
+- `running` → `completed` (subagent reports exit 0)
+- `running` → `failed` (subagent reports exit 1 or 2)
+- `paused` → `running` (orchestrator sends answer via SendMessage)
+- `needs-human` → `running` (human provides answer, orchestrator relays)
+- `needs-human` → `failed` (human decides to abandon the story)
 
 </step>
 
 <step n="5" goal="Receive subagent notifications and route">
 
-The orchestrator is notified natively by Claude Code when each subagent completes or reports back. No polling required.
+The orchestrator is notified natively by Claude Code when each background subagent completes or reports back. No polling is needed — Claude Code delivers notifications automatically.
 
-For each subagent notification:
+### 5.1 Notification routing
 
-1. Read the subagent's report: `{story_id, exit_code, current_step, question_or_finding, findings_file}`
-2. Route by type:
-   - **Question/pause from any step** → Step 6 (classification/question handling)
-   - **Review findings** → Step 6 (finding classification)
-   - **Pipeline complete** → Step 8 (completion)
-   - **Pipeline failure** → Step 7 (error handling)
+When a subagent notification arrives, read its structured report and route by `report_type`:
 
-Show a periodic status display:
+| `report_type` | Meaning | Action |
+|---------------|---------|--------|
+| `"question"` | Subagent hit a pause in any pipeline step (exit 3 or workflow HALT) | Update subagent state to `paused`. If report includes `findings_file`, note it for later classification. Go to Step 6 for question handling — orchestrator decides whether to answer via LLM reasoning or escalate to human. |
+| `"complete"` | Pipeline finished successfully (exit 0) | Update subagent state to `completed`, `current_step` to `done`. If `findings_file` is present, go to Step 6 for finding classification first, then Step 8 for CSV update. If no findings, go directly to Step 8. |
+| `"failure"` | Pipeline failed (exit 1 or 2) | Update subagent state to `failed`. Handle per the error handling table: exit 1 → alert human, mark blocked; exit 2 → alert human, offer to investigate. |
+
+After routing each notification, update the orchestrator state model (from Step 4.4) and display the status.
+
+### 5.2 Status display
+
+After every notification, display the current orchestrator state:
 
 ```
-Orchestrator Status
-  Subagent A (Story 1.2): running    — step: dev-story
-  Subagent B (Story 1.3): waiting    — needs: human decision on AC clarification
-  Subagent C (Story 1.7): complete   — exit 0, trace PASS
+━━━ Orchestrator Status ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  [{state_icon}] Story {story_id} ({story_title})
+      state: {state}  step: {current_step}
+      {pending_question if any}
 
-  Completed: 1/3   Running: 1   Waiting: 1
+  [{state_icon}] Story {story_id} ({story_title})
+      state: {state}  step: {current_step}
+
+  Completed: {N}/{total}   Running: {M}   Waiting: {W}   Failed: {F}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-<!-- Story B-3 fills in the notification handling details -->
+State icons:
+- `running` → `>>` (active)
+- `paused` → `||` (orchestrator answering)
+- `needs-human` → `??` (waiting for human)
+- `completed` → `OK` (done)
+- `failed` → `!!` (error)
+
+### 5.3 Monitoring loop
+
+The orchestrator remains in this step as long as subagents are active. The loop is event-driven:
+
+1. Wait for the next subagent notification (Claude Code delivers it automatically)
+2. Route the notification (5.1)
+3. Display status (5.2)
+4. If the routed action produced a SendMessage (from Step 6), the subagent continues and will report again — return to waiting
+5. If all subagents are `completed` or `failed`, exit the monitoring loop
+6. If any subagent completed and freed a slot, check if queued stories can now launch — if so, return to Step 4 to spawn them
 
 </step>
 
