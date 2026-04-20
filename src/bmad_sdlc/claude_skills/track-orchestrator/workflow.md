@@ -622,68 +622,314 @@ When the subagent reports back from trace:
 
 <step n="8" goal="On story completion, update CSV and re-plan">
 
-When a subagent reports story completion (trace PASS):
+When a subagent reports story completion (trace PASS or WAIVED):
 
-1. Update CSV:
+### 8.1 Update state and CSV
+
+1. Record the completion timestamp for this subagent in the orchestrator state:
+   ```
+   subagent.completion_time = now()
+   subagent.state = "completed"
+   subagent.current_step = "done"
+   ```
+
+2. Update the CSV to mark the story as Done:
    ```bash
    python3 helpers/state.py update-csv {story_id} Done
    ```
+   If the command fails (exit 1), retry once. If it fails again, alert the human and continue — do not block re-planning on a CSV write failure.
 
-2. If per-story branching is enabled, merge story branch to main:
-   ```bash
-   git checkout main && git merge story/{story_id}
-   ```
-   If merge conflicts arise, alert human — do NOT auto-resolve.
+### 8.2 Branch merge (if per-story branching enabled)
 
-3. Check for epic completion:
-   ```bash
-   python3 helpers/state.py epic-status {epic_id}
-   ```
-
-4. If epic is complete (`all_done: true`):
-   - `retro.gate: advisory` → print banner suggesting `/bmad-retrospective`, continue
-   - `retro.gate: blocking` → pause new spawning until human confirms retro is done
-   - `retro.gate: auto` → spawn a subagent to run `/bmad-retrospective`, wait for completion, proceed
-
-5. Re-identify runnable stories and spawn new subagents if slots available.
-
-<!-- Story B-5 fills in the completion and re-planning details -->
 <!-- Story B-6 fills in the branch merge details -->
+
+If per-story branching is enabled:
+```bash
+git checkout main && git merge story/{story_id}
+```
+If merge conflicts arise, alert human — do NOT auto-resolve. Mark this story as `needs-human` until conflicts are resolved. Do NOT proceed to re-planning for this story until the merge completes.
+
+After successful merge, delete the story branch:
+```bash
+git branch -d story/{story_id}
+```
+
+### 8.3 Epic completion check and retro gate
+
+Check if the completed story's epic is now fully done:
+
+```bash
+python3 helpers/state.py epic-status {epic_id}
+```
+
+Parse the JSON output. If `all_done: false`, skip to 8.4 (re-planning).
+
+If `all_done: true`, route by the configured `retro.gate` mode:
+
+**`retro.gate: advisory`** (default in Phase 2):
+
+```
+━━━ Epic {epic_id} Complete ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+All stories in Epic {epic_id} are done.
+
+Suggested: Run /bmad-retrospective to capture lessons learned.
+This is advisory only — continuing with next epic.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+Continue to 8.4 immediately.
+
+**`retro.gate: blocking`**:
+
+```
+━━━ Epic {epic_id} Complete — Retro Required ━━━━━━━━━━━━━━━
+All stories in Epic {epic_id} are done.
+
+Retrospective is REQUIRED before starting next epic.
+Run /bmad-retrospective and confirm completion.
+
+New story spawning is paused until you confirm.
+[C] Confirm retro done — resume spawning
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+HALT — do NOT spawn any new stories until the human confirms `[C]`. Already-running subagents continue unaffected. After confirmation, proceed to 8.4.
+
+**`retro.gate: auto`**:
+
+Spawn a retro subagent:
+
+```
+Agent({
+  description: "Epic {epic_id} Retrospective",
+  prompt: "Run the BMAD retrospective for Epic {epic_id}:\n\n/bmad-retrospective\n\nWhen complete, report back with:\n- report_type: \"retro_complete\"\n- epic_id: {epic_id}\n- detail: Summary of key findings and lessons learned",
+  run_in_background: true
+})
+```
+
+Display status:
+```
+━━━ Epic {epic_id} Complete — Running Retrospective ━━━━━━━
+Spawned retro subagent. Waiting for completion before
+spawning stories from the next epic.
+Already-running subagents continue unaffected.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+Track the retro subagent in orchestrator state:
+```
+retro_subagent = {
+  subagent_id: "<from Agent tool>",
+  epic_id: {epic_id},
+  state: "running",
+  launch_time: now()
+}
+```
+
+When a notification arrives from the retro subagent (identified by `report_type: "retro_complete"`), log the retro output, set `retro_subagent = null`, and proceed to 8.4. Already-running story subagents continue unaffected during the wait. Note: the retro subagent does NOT count toward `max_concurrent` story slots but IS tracked separately for termination checks (Step 9.2).
+
+### 8.4 Re-planning — find and spawn newly unblocked stories
+
+After CSV update (and branch merge, and retro gate if applicable):
+
+1. **Re-run runnable detection:**
+   ```bash
+   python3 helpers/state.py runnable [--epic {target_epic}]
+   ```
+   Parse the JSON output to get the current list of runnable stories.
+
+2. **Calculate available slots:**
+   ```
+   active_count = count of subagents where state IN ("running", "paused", "needs-human")
+   available_slots = max_concurrent - active_count
+   ```
+   Only `completed` and `failed` subagents free slots.
+
+3. **Filter already-launched stories:**
+   Remove from the runnable list any stories that already have a subagent (in any state). Only truly new stories should be spawned.
+
+4. **If available_slots > 0 AND new runnable stories exist:**
+
+   Select up to `available_slots` stories from the runnable list, prioritized by downstream impact (same logic as Step 3.1).
+
+   For each selected story, return to **Step 4** (spawn subagents) to launch it — use the same prompt template, stagger delay, and orchestrator state tracking.
+
+   After all new spawns complete, return to **Step 5** (monitoring loop) to continue receiving notifications.
+
+5. **If available_slots == 0 OR no new runnable stories:**
+
+   No new spawns needed. Return to **Step 5** to continue monitoring remaining active subagents.
+
+6. **If no subagents are active AND no runnable stories remain AND no retro subagent pending:**
+
+   All work is complete (or blocked). Proceed to **Step 10** for the final report.
 
 </step>
 
 <step n="9" goal="Repeat until epic/project complete">
 
-Continue the spawn → notify → classify → complete loop until:
-- All planned stories are done, OR
-- All remaining stories are human-blocked, OR
-- User requests stop
+The orchestrator operates as an event-driven loop. There is no explicit "iteration" — the loop is driven by subagent notifications arriving in Step 5.
 
-On each iteration, re-evaluate the dependency graph to find newly unblocked stories.
+### 9.1 The orchestration cycle
+
+The cycle flows through steps in this order:
+
+```
+Step 4 (spawn) → Step 5 (monitor/notify) → Step 6 (classify/questions) → Step 7 (trace) → Step 8 (complete/replan) → back to Step 5
+                                                                                                       ↓
+                                                                                              Step 4 (spawn new)
+                                                                                                       ↓
+                                                                                              Step 5 (monitor)
+```
+
+Each subagent notification triggers one pass through Steps 5→6→7→8. Step 8's re-planning may spawn new subagents (returning briefly to Step 4), then control always returns to Step 5 to await the next notification.
+
+### 9.2 Termination conditions
+
+The loop terminates when ALL of the following are true:
+
+1. **No active subagents** — zero subagents in `running`, `paused`, or `needs-human` state
+2. **No queued stories** — `state.py runnable` returns an empty list (no stories with unmet dependencies that are newly satisfiable)
+3. **No retro subagent pending** — if `retro.gate: auto` spawned a retro subagent, it has completed
+
+When these conditions are met, proceed to **Step 10** (final report).
+
+### 9.3 Partial completion states
+
+Not all subagents will necessarily succeed. The loop handles mixed states:
+
+| State | Meaning | Effect on loop |
+|-------|---------|----------------|
+| All completed | Every story reached trace PASS | Loop terminates → Step 10 |
+| Some failed, rest completed | Mix of exit 1/2 and exit 0 | Loop terminates → Step 10 (failures noted in report) |
+| Some needs-human, rest completed | Human decisions pending | Loop does NOT terminate — human-blocked stories hold the loop open. On each subsequent notification from any source, display a reminder: "Still waiting on human input for Story {id}..." |
+| No subagents active, but runnable stories exist with no available slots | Should not happen (slots freed on completion) | If somehow reached, log a warning and force re-evaluation of slots |
+
+### 9.4 Dependency graph re-evaluation
+
+On each pass through Step 8 (after a story completes), the dependency graph is implicitly re-evaluated via `state.py runnable`. The `runnable` command already checks which dependencies are met based on current CSV status.
+
+Full graph regeneration (`state.py generate-graph --force`) is NOT needed on each completion — the runnable command is sufficient and cheaper. Only regenerate the graph document if the user explicitly requests `plan` mode again.
+
+### 9.5 User interruption
+
+At any point during the loop, the user can:
+- Type "status" or "monitor" → display the Step 5.2 status table
+- Type "kill all" or "stop" → terminate all active subagents, proceed to Step 10
+- Type "kill story {id}" → terminate one specific subagent, mark it `failed`, continue loop with remaining
+- Provide an answer to a pending question → relay via SendMessage, subagent resumes
 
 </step>
 
 <step n="10" goal="Final report">
 
-When all planned tracks have reached completion (or human-blocked):
+When the loop terminates (Step 9.2 conditions met), generate the final orchestration report.
+
+### 10.1 Compute metrics
+
+For each subagent that was tracked during this session:
 
 ```
-Orchestration Complete
-
-  Stories completed:     {N}
-  Stories human-blocked: {M}
-  Stories failed:        {K}
-  Wall-clock time:       {HH:MM:SS}
-
-  CSV updated:           {list of story_ids set to Done}
-  Epic(s) completed:     {list} (retrospective {status})
-
-  Next steps:
-    - Review completed stories via sprint-status.yaml
-    - Handle any human-blocked stories
-    - Run /bmad-retrospective for completed epics (if advisory gate)
-    - Re-invoke this skill to orchestrate next tracks
+story_id:        from orchestrator state
+gate_decision:   PASS | WAIVED | CONCERNS | FAIL | N/A (if story failed before trace)
+exit_code:       0 | 1 | 2 | 3
+duration:        completion_time - launch_time (format as MM:SS or HH:MM:SS)
+findings_count:  number of review findings classified (0 if no findings)
+patches_applied: number of auto-fix patches applied
+retries:         number of patch retry cycles
 ```
+
+Aggregate metrics:
+```
+total_stories:      count of all subagents spawned this session
+completed_count:    count where state == "completed"
+failed_count:       count where state == "failed"
+human_blocked:      count where state == "needs-human" at termination
+total_wall_clock:   last_completion_time - first_launch_time
+avg_story_duration: mean of per-story durations (completed stories only)
+```
+
+### 10.2 Generate report
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    Orchestration Complete
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## Per-Story Outcomes
+
+| Story | Title | Gate | Duration | Findings | Patches | Exit |
+|-------|-------|------|----------|----------|---------|------|
+| {story_id} | {title} | {gate} | {duration} | {findings} | {patches} | {exit} |
+| ... | ... | ... | ... | ... | ... | ... |
+
+## Aggregate Metrics
+
+  Stories completed:     {completed_count}/{total_stories}
+  Stories failed:        {failed_count}
+  Stories human-blocked: {human_blocked}
+  Total wall-clock:      {total_wall_clock}
+  Avg story duration:    {avg_story_duration}
+
+## CSV Updates
+
+  Stories marked Done:   {list of story_ids}
+
+## Epic Status
+
+  {For each epic touched this session:}
+  Epic {epic_id}: {done_count}/{total_count} stories done
+    {If all_done: "COMPLETE — retrospective {retro_status}"}
+    {If not all_done: "IN PROGRESS — {remaining} stories remaining"}
+
+## Deferred Work
+
+  {count} findings deferred to future stories.
+  {If count > 0: "See: _bmad-output/implementation-artifacts/deferred-work.md"}
+
+## Orchestrator Decisions
+
+  Questions answered by orchestrator: {count}
+  Questions escalated to human:       {count}
+  {If orchestrator_answered > 0: "Review audit log above for orchestrator-answered questions."}
+
+## Next Steps
+
+  {If human_blocked > 0:}
+  - Resolve pending human decisions for: {list of blocked story_ids}
+
+  {If failed_count > 0:}
+  - Investigate failed stories: {list of failed story_ids}
+
+  {If epic completed with advisory gate:}
+  - Run /bmad-retrospective for Epic {epic_id}
+
+  {If runnable stories exist but were not spawned (e.g., session ended):}
+  - Re-invoke this skill to orchestrate remaining tracks
+
+  {If all epics complete:}
+  - All planned work is done. Consider running /bmad-retrospective for a final review.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### 10.3 Token estimate (informational)
+
+Provide a rough token estimate for the session:
+
+```
+Estimated token usage (orchestrator session only):
+  Planning + graph:        ~{N}K tokens
+  Per-story coordination:  ~{M}K tokens × {stories} stories = ~{total}K
+  Classification:          ~{K}K tokens
+  Final report:            ~1K tokens
+  Total orchestrator:      ~{sum}K tokens
+
+Note: bmpipe workflow execution (inside subagents) dominates total cost
+at 50-200K tokens per story. Orchestrator overhead is ~5-20% of total.
+```
+
+This is an estimate for user awareness, not a precise measurement. Derive from conversation length if available, otherwise use the ranges from the design doc (§3.6 Token Cost Model).
 
 </step>
 

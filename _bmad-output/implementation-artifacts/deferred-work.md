@@ -38,3 +38,9 @@
 - **`story_id_to_key` crashes on dotless story_id**: If a CSV row has `story_id` without a dot (e.g., a milestone row), `split(".")` unpacking fails with `ValueError`. Pre-existing.
 - **Missing CSV columns cause raw KeyError**: No guard on required columns (`story_id`, `story_title`, `epic_id`). Crash with Python traceback instead of clean exit. Pre-existing.
 - **Duplicate titles produce ambiguous story keys**: `story_id_to_key()` builds keys from titles — two stories with identical titles get the same key, breaking reverse lookups. Pre-existing.
+
+## From Story B-5 — Story Completion, CSV Update, and Re-Planning (orchestrator-deferred)
+
+- **Branch merge races with running subagents**: Step 8.2's `git checkout main && git merge` changes the working directory for all concurrent subagents. B-6 must use git worktrees or enforce sequential merges when no other subagents are active. (B-6 scope)
+- **Merge conflict resolution flow incomplete**: When Step 8.2 marks a story `needs-human` due to merge conflict, there is no mechanism for the orchestrator to detect when the human resolves the conflict and transition the story back to complete the 8.3/8.4 flow. B-6 must define this. (B-6 scope)
+- **Retro auto-spawn timeout**: `retro.gate: auto` has no timeout or failure handling if the retro subagent hangs. Phase 3 enhancement — acceptable risk since Phase 2 defaults to advisory gate.
