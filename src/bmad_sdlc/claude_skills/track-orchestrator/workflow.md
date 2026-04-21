@@ -137,9 +137,15 @@ Given the runnable stories from Step 2, build the execution plan:
 
 ### 3.1 Select stories to launch
 
-1. **Sort by downstream impact** — count how many other stories (directly or transitively) depend on each runnable story. Launch the ones that unblock the most work first.
-2. **Apply max concurrency** — take at most `max_concurrent` stories (default 3). If more stories are runnable than slots available, the remainder waits for a slot to free up.
-3. **Check for shared-file conflicts** — present the selected stories and ask the user:
+1. **Apply layer-derived parallelism** — use the dependency graph's topological layers (computed by `state.py generate-graph`):
+   - Stories in the SAME layer can run in parallel (auto-parallelize)
+   - Stories in DIFFERENT layers must run sequentially (earlier layer completes first)
+   - Single-story layers are inherently sequential — spawn one, wait
+   - Multi-story layers are inherently parallel — spawn all up to max_concurrent
+   - Present this as a fact: "Stories 2.1-2.7 form layers 0-6 (sequential). Stories 2.8-2.12 are all in layer 7 (parallelizable)."
+2. **Sort by downstream impact** within a layer — count how many other stories depend on each runnable story. Launch the ones that unblock the most work first.
+3. **Apply max concurrency** — take at most `max_concurrent` stories (default 3). If more stories are runnable than slots available, the remainder waits for a slot to free up.
+4. **Check for shared-file conflicts** — ONLY ask the user if multiple stories in the same parallelizable layer might touch the same files:
 
    ```
    These stories are planned for parallel execution:
@@ -750,7 +756,15 @@ After CSV update (and branch merge, and retro gate if applicable):
 
 4. **If available_slots > 0 AND new runnable stories exist:**
 
-   Select up to `available_slots` stories from the runnable list, prioritized by downstream impact (same logic as Step 3.1).
+   Apply **layer-derived parallelism** (from dependency graph topological layers):
+   - Stories in the SAME layer can run in parallel (auto-parallelize, up to available_slots)
+   - Stories in DIFFERENT layers must run sequentially (the earlier layer must complete before the later layer spawns)
+   - Single-story layers are inherently sequential — spawn one, wait for completion
+   - Multi-story layers are inherently parallel — spawn all (up to max_concurrent), wait for all
+
+   Within a layer, select up to `available_slots` stories, prioritized by downstream impact (same logic as Step 3.1).
+
+   Only ask the user for confirmation if shared-file conflicts exist within a parallelizable layer. Otherwise, auto-proceed.
 
    For each selected story, return to **Step 4** (spawn subagents) to launch it — use the same prompt template, stagger delay, and orchestrator state tracking.
 
