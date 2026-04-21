@@ -13,6 +13,8 @@ Usage:
     python3 state.py summary                # Print a summary of current sprint state
     python3 state.py update-csv <story-id> <new-status>  # Update CSV (single-writer, safe)
     python3 state.py generate-graph [--output PATH] [--force]  # Generate dependency graph
+    python3 state.py prep-tasks [--config PATH]  # List prep tasks with status
+    python3 state.py prep-blocked <story-id>     # Check if story is blocked by unverified prep task
 
 Exit codes:
     0 — success
@@ -508,6 +510,130 @@ def generate_graph(root: Path, output_path: Path, force: bool = False) -> dict:
     }
 
 
+def _find_prep_tasks_config(root: Path, config_path: Optional[Path] = None) -> Optional[Path]:
+    """Find the prep_tasks config file."""
+    if config_path and config_path.exists():
+        return config_path
+    # Default location
+    default = root / "_bmad-output" / "implementation-artifacts" / "prep_tasks.yaml"
+    if default.exists():
+        return default
+    return None
+
+
+def _parse_prep_tasks_yaml(config_path: Path) -> list[dict]:
+    """Parse prep_tasks.yaml into a list of task dicts.
+
+    Uses a simple line-based YAML parser (no external dependency) since the
+    format is a flat list of key-value pairs under `prep_tasks:`.
+    """
+    if not config_path.exists():
+        return []
+
+    content = config_path.read_text()
+    tasks: list[dict] = []
+    current_task: Optional[dict] = None
+    in_prep_tasks = False
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if stripped == "prep_tasks:":
+            in_prep_tasks = True
+            continue
+
+        if not in_prep_tasks:
+            continue
+
+        # Top-level key that isn't indented under prep_tasks
+        if not line[0].isspace():
+            break
+
+        # New list item
+        if stripped.startswith("- "):
+            if current_task:
+                tasks.append(current_task)
+            current_task = {}
+            # Parse inline key: value after "- "
+            rest = stripped[2:]
+            if ":" in rest:
+                key, _, value = rest.partition(":")
+                current_task[key.strip()] = value.strip().strip('"').strip("'")
+        elif current_task is not None and ":" in stripped:
+            key, _, value = stripped.partition(":")
+            current_task[key.strip()] = value.strip().strip('"').strip("'")
+
+    if current_task:
+        tasks.append(current_task)
+
+    return tasks
+
+
+def prep_tasks_list(root: Path, config_path: Optional[Path] = None) -> list[dict]:
+    """Return list of prep tasks with their current status.
+
+    Status is determined by checking a state file at
+    _bmad-output/implementation-artifacts/.prep_task_state.json
+    which the orchestrator updates as tasks progress.
+    """
+    cfg = _find_prep_tasks_config(root, config_path)
+    if not cfg:
+        return []
+
+    tasks = _parse_prep_tasks_yaml(cfg)
+
+    # Load state file if it exists
+    state_file = root / "_bmad-output" / "implementation-artifacts" / ".prep_task_state.json"
+    state: dict = {}
+    if state_file.exists():
+        try:
+            loaded = json.loads(state_file.read_text())
+            if isinstance(loaded, dict):
+                state = loaded
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    result = []
+    for task in tasks:
+        task_id = task.get("id", "")
+        task_state = state.get(task_id, "pending")
+        result.append({
+            "id": task_id,
+            "description": task.get("description", ""),
+            "command": task.get("command", ""),
+            "verify": task.get("verify", ""),
+            "deadline_before": task.get("deadline_before", ""),
+            "depends_on": task.get("depends_on", ""),
+            "status": task_state,
+        })
+
+    return result
+
+
+def prep_blocked(root: Path, story_id: str, config_path: Optional[Path] = None) -> dict:
+    """Check if a story is blocked by an unverified prep task.
+
+    Returns {blocked: bool, blocking_tasks: [...]} where blocking_tasks
+    lists prep task IDs that have deadline_before matching this story_id
+    and are not yet verified.
+    """
+    tasks = prep_tasks_list(root, config_path)
+    blocking = []
+
+    for task in tasks:
+        deadline = task.get("deadline_before", "")
+        if deadline == story_id and task["status"] != "verified":
+            blocking.append(task["id"])
+
+    return {
+        "story_id": story_id,
+        "blocked": len(blocking) > 0,
+        "blocking_tasks": blocking,
+    }
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__, file=sys.stderr)
@@ -579,6 +705,33 @@ def main():
                 if not output_path.is_absolute():
                     output_path = project_root / output_path
         result = generate_graph(project_root, output_path, force=force)
+        print(json.dumps(result, indent=2))
+
+    elif cmd == "prep-tasks":
+        project_root = root or find_project_root()
+        config_path = None
+        if "--config" in args:
+            idx = args.index("--config")
+            if idx + 1 < len(args):
+                config_path = Path(args[idx + 1])
+                if not config_path.is_absolute():
+                    config_path = project_root / config_path
+        result = prep_tasks_list(project_root, config_path)
+        print(json.dumps(result, indent=2))
+
+    elif cmd == "prep-blocked":
+        if len(args) < 2:
+            print("Missing story_id", file=sys.stderr)
+            sys.exit(2)
+        project_root = root or find_project_root()
+        config_path = None
+        if "--config" in args:
+            idx = args.index("--config")
+            if idx + 1 < len(args):
+                config_path = Path(args[idx + 1])
+                if not config_path.is_absolute():
+                    config_path = project_root / config_path
+        result = prep_blocked(project_root, args[1], config_path)
         print(json.dumps(result, indent=2))
 
     else:

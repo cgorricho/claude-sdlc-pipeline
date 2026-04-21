@@ -135,6 +135,31 @@ If the runnable list is empty, report to user: "No stories are currently runnabl
 
 Given the runnable stories from Step 2, build the execution plan:
 
+### 3.0 Load prep tasks
+
+Check for prep tasks configuration:
+
+```bash
+python3 helpers/state.py prep-tasks
+```
+
+Parse the JSON output. Each entry has:
+- `id` — unique identifier (e.g., "docker-ci-wiring")
+- `description` — what the prep task does
+- `command` — the command to run in the subagent
+- `verify` — the command the orchestrator runs to confirm success
+- `deadline_before` — story ID that this task must complete before (e.g., "2.7")
+- `depends_on` — optional prep task ID that must verify before this task can spawn
+- `status` — `pending`, `running`, `completed`, `verified`, or `failed`
+
+If the list is empty (no config file or no tasks defined), skip to 3.1 — no prep tasks to plan.
+
+If prep tasks exist with status `pending`:
+1. **Cycle check** — walk `depends_on` chains for all pending prep tasks. If a cycle is detected (A depends_on B depends_on A), HALT and alert the human: "Circular depends_on detected in prep tasks: {cycle members}. Fix the config before proceeding."
+2. Check `depends_on` chains — a prep task cannot spawn until its `depends_on` target has `status: verified`
+3. Collect launchable prep tasks (status=pending, depends_on satisfied or empty)
+4. These will be included in the execution plan alongside stories
+
 ### 3.1 Select stories to launch
 
 1. **Apply layer-derived parallelism** — use the dependency graph's topological layers (computed by `state.py generate-graph`):
@@ -163,16 +188,26 @@ Given the runnable stories from Step 2, build the execution plan:
 
 ```
 Execution Plan
-  Track 1: Story {story_id} — {story_title}
-  Track 2: Story {story_id} — {story_title}
+  Stories:
+    Track 1: Story {story_id} — {story_title}
+    Track 2: Story {story_id} — {story_title}
+
+  {If prep tasks exist with status pending and launchable:}
+  Prep Tasks:
+    [{prep_task_id}] {description} → blocks Story {deadline_before}
+    [{prep_task_id}] {description} → blocks Story {deadline_before}
 
   Pipeline command: bmpipe run --story {id}
   Launch stagger:   {launch_stagger_seconds}s between spawns
   Max concurrent:   {max_concurrent}
   Remaining queued: {N} stories (will launch as slots free)
+  {If any stories blocked by prep tasks:}
+  Blocked by prep: Story {story_id} (waiting on [{prep_task_id}])
 
 Proceed? [Y]es / [N]o
 ```
+
+Note: Prep tasks count toward `max_concurrent`. If 1 prep task + 2 stories are planned and max_concurrent=3, all three can launch. If max_concurrent=2, only 2 of the 3 will launch initially.
 
 HALT — wait for user confirmation before spawning. If user says no, return to Step 2 for re-planning.
 
@@ -342,10 +377,14 @@ Track all active subagents in this structure (in-memory, not persisted):
 ```
 active_subagents = [
   {
+    type: "story" | "prep_task",
     subagent_id: "<from Agent tool>",
-    story_id: "1.2",
-    story_key: "1-2-design-token-foundation",
-    state: "running" | "paused" | "needs-human" | "completed" | "failed",
+    story_id: "1.2",              # for stories
+    story_key: "1-2-design-token-foundation",  # for stories
+    prep_task_id: null,            # for prep tasks: e.g., "docker-ci-wiring"
+    verify_command: null,          # for prep tasks: the verify command to run after completion
+    deadline_before: null,         # for prep tasks: which story_id this blocks
+    state: "running" | "paused" | "needs-human" | "completed" | "verified" | "failed",
     current_step: "starting" | "create-story" | "atdd" | "dev-story" | "code-review" | "trace" | "done",
     launch_time: "<timestamp>",
     pending_question: null | "<the question text>"
@@ -354,7 +393,7 @@ active_subagents = [
 ]
 ```
 
-State transitions:
+State transitions (stories):
 - `running` → `paused` (subagent reports question, orchestrator can answer)
 - `running` → `needs-human` (subagent reports question, requires human)
 - `running` → `completed` (subagent reports exit 0)
@@ -362,6 +401,92 @@ State transitions:
 - `paused` → `running` (orchestrator sends answer via SendMessage)
 - `needs-human` → `running` (human provides answer, orchestrator relays)
 - `needs-human` → `failed` (human decides to abandon the story)
+
+State transitions (prep tasks):
+- `running` → `completed` (subagent reports exit 0 — command finished)
+- `running` → `failed` (subagent reports non-zero exit)
+- `completed` → `verified` (orchestrator runs verify command, passes)
+- `completed` → `failed` (orchestrator runs verify command, fails — escalate to human)
+
+### 4.5 Prep task subagent prompt template
+
+Use this template for prep task subagents, substituting `{prep_task_id}`, `{description}`, and `{command}`:
+
+```
+You are a prep task executor for the BMPIPE Track Orchestrator.
+
+## Your Assignment
+
+- **Task ID:** {prep_task_id}
+- **Description:** {description}
+
+## Instructions
+
+Run the following command:
+
+```bash
+{command}
+```
+
+After the command completes, report back to the orchestrator IMMEDIATELY:
+
+### If command exits 0 (success):
+Report:
+- report_type: "prep_complete"
+- prep_task_id: "{prep_task_id}"
+- exit_code: 0
+- detail: Brief summary of command output (last 20 lines of stdout)
+
+### If command exits non-zero (failure):
+Report:
+- report_type: "prep_failure"
+- prep_task_id: "{prep_task_id}"
+- exit_code: {actual exit code}
+- detail: Last 30 lines of combined stdout/stderr showing what went wrong
+
+## Critical Rules
+
+- Run ONLY the assigned command — do not improvise or run additional commands
+- Do NOT attempt to fix failures — just report them
+- Do NOT modify any files outside of what the command itself does
+- Report back immediately after command completion — do not wait
+```
+
+### 4.6 Prep task spawn sequence
+
+For each prep task in the plan (interleaved with stories, respecting stagger):
+
+1. Spawn the subagent:
+   ```
+   Agent({
+     description: "Prep: {prep_task_id} — {description}",
+     prompt: <filled template from 4.5>,
+     run_in_background: true
+   })
+   ```
+
+2. Record in orchestrator state:
+   - **type**: `prep_task`
+   - **subagent_id**: the ID returned by the Agent tool
+   - **prep_task_id**: the task's id
+   - **verify_command**: the task's verify field
+   - **deadline_before**: the task's deadline_before story_id
+   - **state**: `running`
+   - **current_step**: `starting`
+   - **launch_time**: current timestamp
+
+3. Update the prep task state file so `state.py` can report status:
+   ```bash
+   python3 -c "
+   import json; from pathlib import Path
+   p = Path('_bmad-output/implementation-artifacts/.prep_task_state.json')
+   state = json.loads(p.read_text()) if p.exists() else {}
+   state['{prep_task_id}'] = 'running'
+   p.write_text(json.dumps(state, indent=2))
+   "
+   ```
+
+4. Apply stagger delay before next spawn (same as stories).
 
 </step>
 
@@ -373,13 +498,76 @@ The orchestrator is notified natively by Claude Code when each background subage
 
 When a subagent notification arrives, read its structured report and route by `report_type`:
 
+**Story subagent reports:**
+
 | `report_type` | Meaning | Action |
 |---------------|---------|--------|
 | `"question"` | Subagent hit a pause in any pipeline step (exit 3 or workflow HALT) | Update subagent state to `paused`. If report includes `findings_file`, note it for later classification. Go to Step 6 for question handling — orchestrator decides whether to answer via LLM reasoning or escalate to human. |
 | `"complete"` | Pipeline finished successfully (exit 0) | Update subagent state to `completed`, `current_step` to `done`. If `findings_file` is present, go to Step 6 for finding classification first, then Step 8 for CSV update. If no findings, go directly to Step 8. |
 | `"failure"` | Pipeline failed (exit 1 or 2) | Update subagent state to `failed`. Handle per the error handling table: exit 1 → alert human, mark blocked; exit 2 → alert human, offer to investigate. |
 
+**Prep task subagent reports:**
+
+| `report_type` | Meaning | Action |
+|---------------|---------|--------|
+| `"prep_complete"` | Prep task command finished (exit 0) | Update subagent state to `completed`. Run verification (see 5.4 below). |
+| `"prep_failure"` | Prep task command failed (non-zero exit) | Update subagent state to `failed`. Alert human with the failure detail. Update state file. |
+
 After routing each notification, update the orchestrator state model (from Step 4.4) and display the status.
+
+### 5.4 Prep task verification
+
+When a prep task subagent reports `"prep_complete"`, the orchestrator runs the verify command directly:
+
+```bash
+{verify_command}
+```
+
+**If verify exits 0 (success):**
+
+1. Update subagent state to `verified`
+2. Update the state file:
+   ```bash
+   python3 -c "
+   import json; from pathlib import Path
+   p = Path('_bmad-output/implementation-artifacts/.prep_task_state.json')
+   state = json.loads(p.read_text()) if p.exists() else {}
+   state['{prep_task_id}'] = 'verified'
+   p.write_text(json.dumps(state, indent=2))
+   "
+   ```
+3. Display:
+   ```
+   ✓ Prep task [{prep_task_id}] verified successfully.
+     Stories unblocked: {list of stories with deadline_before matching this task}
+   ```
+4. Check if any other prep tasks have `depends_on` pointing to this task — if so, they are now launchable. Add them to the spawn queue.
+5. Proceed to Step 8.4 (re-planning) to check for newly unblocked stories.
+
+**If verify exits non-zero (failure):**
+
+1. Update subagent state to `failed`
+2. Update the state file with `failed` status
+3. Alert human:
+   ```
+   ━━━ Prep Task Verify Failed ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Task: [{prep_task_id}] {description}
+   Verify command: {verify_command}
+   Exit code: {exit_code}
+   Output: {last 20 lines of verify output}
+
+   Stories blocked by this task: {deadline_before story IDs}
+
+   Options:
+   [R] Retry verify (after manual fix)
+   [M] Mark as verified manually (override)
+   [A] Abandon — leave stories blocked
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ```
+4. HALT and wait for human:
+   - **[R]**: Re-run the verify command. Route result through this same 5.4 logic.
+   - **[M]**: Override — set state to `verified`, update state file, proceed as if passed.
+   - **[A]**: Leave as `failed`. Stories remain blocked. Continue monitoring other subagents.
 
 ### 5.2 Status display
 
@@ -394,7 +582,12 @@ After every notification, display the current orchestrator state:
   [{state_icon}] Story {story_id} ({story_title})
       state: {state}  step: {current_step}
 
-  Completed: {N}/{total}   Running: {M}   Waiting: {W}   Failed: {F}
+  {If prep tasks tracked:}
+  [{state_icon}] Prep [{prep_task_id}] {description}
+      state: {state}  blocks: Story {deadline_before}
+
+  Stories:    Completed: {N}/{total}   Running: {M}   Waiting: {W}   Failed: {F}
+  Prep Tasks: Verified: {V}/{total_prep}   Running: {R}   Failed: {F}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -402,7 +595,8 @@ State icons:
 - `running` → `>>` (active)
 - `paused` → `||` (orchestrator answering)
 - `needs-human` → `??` (waiting for human)
-- `completed` → `OK` (done)
+- `completed` → `OK` (done, pending verify for prep tasks)
+- `verified` → `VV` (prep task verified)
 - `failed` → `!!` (error)
 
 ### 5.3 Monitoring loop
@@ -864,7 +1058,7 @@ retro_subagent = {
 
 When a notification arrives from the retro subagent (identified by `report_type: "retro_complete"`), log the retro output, set `retro_subagent = null`, and proceed to 8.4. Already-running story subagents continue unaffected during the wait. Note: the retro subagent does NOT count toward `max_concurrent` story slots but IS tracked separately for termination checks (Step 9.2).
 
-### 8.4 Re-planning — find and spawn newly unblocked stories
+### 8.4 Re-planning — find and spawn newly unblocked stories and prep tasks
 
 After CSV update (and branch merge, and retro gate if applicable):
 
@@ -874,19 +1068,37 @@ After CSV update (and branch merge, and retro gate if applicable):
    ```
    Parse the JSON output to get the current list of runnable stories.
 
-2. **Calculate available slots:**
+2. **Check prep task blocking on each runnable story:**
+   For each runnable story, check if it's blocked by an unverified prep task:
+   ```bash
+   python3 helpers/state.py prep-blocked {story_id}
+   ```
+   If `blocked: true`, remove the story from the runnable list and log:
+   ```
+   Story {story_id} blocked by prep task [{blocking_task_id}] — skipping until verified.
+   ```
+
+3. **Check for launchable prep tasks:**
+   ```bash
+   python3 helpers/state.py prep-tasks
+   ```
+   Collect prep tasks with `status: pending` whose `depends_on` is empty or points to a prep task with `status: verified`. These are eligible for spawning alongside stories.
+
+4. **Calculate available slots:**
    ```
    active_count = count of subagents where state IN ("running", "paused", "needs-human")
    available_slots = max_concurrent - active_count
    ```
-   Only `completed` and `failed` subagents free slots.
+   Only `completed`, `verified`, and `failed` subagents free slots. Note: both story and prep task subagents count toward this limit.
 
-3. **Filter already-launched stories:**
-   Remove from the runnable list any stories that already have a subagent (in any state). Only truly new stories should be spawned.
+5. **Filter already-launched:**
+   Remove from the runnable list any stories that already have a subagent (in any state). Remove from the prep task list any prep tasks that already have a subagent.
 
-4. **If available_slots > 0 AND new runnable stories exist:**
+6. **If available_slots > 0 AND (new runnable stories OR launchable prep tasks exist):**
 
-   Apply **layer-derived parallelism** (from dependency graph topological layers):
+   **Prep tasks get priority** — if both prep tasks and stories compete for slots, spawn prep tasks first because they unblock downstream stories. Remaining slots go to stories.
+
+   For stories, apply **layer-derived parallelism** (from dependency graph topological layers):
    - Stories in the SAME layer can run in parallel (auto-parallelize, up to available_slots)
    - Stories in DIFFERENT layers must run sequentially (the earlier layer must complete before the later layer spawns)
    - Single-story layers are inherently sequential — spawn one, wait for completion
@@ -896,15 +1108,15 @@ After CSV update (and branch merge, and retro gate if applicable):
 
    Only ask the user for confirmation if shared-file conflicts exist within a parallelizable layer. Otherwise, auto-proceed.
 
-   For each selected story, return to **Step 4** (spawn subagents) to launch it — use the same prompt template, stagger delay, and orchestrator state tracking.
+   For each selected story, return to **Step 4** (spawn subagents) to launch it. For each prep task, use **Step 4.6** (prep task spawn sequence). Apply stagger delay between all spawns.
 
    After all new spawns complete, return to **Step 5** (monitoring loop) to continue receiving notifications.
 
-5. **If available_slots == 0 OR no new runnable stories:**
+7. **If available_slots == 0 OR no new runnable stories/prep tasks:**
 
    No new spawns needed. Return to **Step 5** to continue monitoring remaining active subagents.
 
-6. **If no subagents are active AND no runnable stories remain AND no retro subagent pending:**
+8. **If no subagents are active AND no runnable stories remain AND no launchable prep tasks remain AND no retro subagent pending:**
 
    All work is complete (or blocked). Proceed to **Step 10** for the final report.
 
@@ -932,9 +1144,10 @@ Each subagent notification triggers one pass through Steps 5→6→7→8. Step 8
 
 The loop terminates when ALL of the following are true:
 
-1. **No active subagents** — zero subagents in `running`, `paused`, or `needs-human` state
-2. **No queued stories** — `state.py runnable` returns an empty list (no stories with unmet dependencies that are newly satisfiable)
-3. **No retro subagent pending** — if `retro.gate: auto` spawned a retro subagent, it has completed
+1. **No active subagents** — zero subagents (story or prep task) in `running`, `paused`, or `needs-human` state
+2. **No queued stories** — `state.py runnable` returns an empty list (no stories with unmet dependencies that are newly satisfiable), AND no stories are blocked solely by pending/running prep tasks
+3. **No launchable prep tasks** — `state.py prep-tasks` shows no tasks with status `pending` whose `depends_on` is satisfied
+4. **No retro subagent pending** — if `retro.gate: auto` spawned a retro subagent, it has completed
 
 When these conditions are met, proceed to **Step 10** (final report).
 
@@ -1025,6 +1238,15 @@ avg_story_duration: mean of per-story durations (completed stories only)
   Epic {epic_id}: {done_count}/{total_count} stories done
     {If all_done: "COMPLETE — retrospective {retro_status}"}
     {If not all_done: "IN PROGRESS — {remaining} stories remaining"}
+
+## Prep Tasks
+
+  {If any prep tasks were tracked:}
+  | Task ID | Description | Status | Duration | Blocks |
+  |---------|-------------|--------|----------|--------|
+  | {prep_task_id} | {description} | {verified/failed} | {duration} | Story {deadline_before} |
+
+  {If no prep tasks: "No prep tasks configured for this session."}
 
 ## Deferred Work
 
