@@ -184,11 +184,55 @@ For each story in the approved plan, in order:
 
 ### 4.1 Pre-spawn setup (per story)
 
-1. If per-story branching is enabled (Story B-6):
+Create an isolated branch for this story before spawning the subagent:
+
+1. **Verify clean state on main:**
+   ```bash
+   git checkout main
+   git status --porcelain
+   ```
+   If the working tree is dirty (non-empty output), HALT and alert the human:
+   ```
+   ━━━ Dirty Working Tree ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Cannot create story branch — uncommitted changes on main.
+   Please commit or stash changes before proceeding.
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ```
+
+2. **Check if branch already exists:**
+   ```bash
+   git branch --list "story/{story_id}"
+   ```
+   If the branch exists (non-empty output), HALT and ask the human:
+   ```
+   ━━━ Branch Exists: story/{story_id} ━━━━━━━━━━━━━━━━━━━━━
+   A branch for this story already exists (possibly from an
+   interrupted previous run).
+
+   [D] Delete and recreate from current main
+   [R] Resume — spawn subagent on the existing branch
+   [A] Abort — skip this story
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ```
+   - **[D]**: Delete the branch (`git branch -D story/{story_id}`) and continue to step 3.
+   - **[R]**: Skip branch creation, proceed directly to 4.2 (spawn on existing branch).
+   - **[A]**: Remove this story from the current batch, continue with remaining stories.
+
+3. **Create story branch from main:**
    ```bash
    git checkout -b story/{story_id}
    ```
-   <!-- Story B-6 fills in the per-story branching logic -->
+   Confirm the branch was created:
+   ```bash
+   git branch --show-current
+   ```
+   Expected output: `story/{story_id}`. If creation fails, alert human and skip this story.
+
+4. **Return to main for next story:**
+   ```bash
+   git checkout main
+   ```
+   The subagent will check out the story branch itself when it starts (the branch instruction in the prompt handles this).
 
 ### 4.2 Subagent prompt template
 
@@ -239,11 +283,25 @@ Report:
 - current_step: Which step failed (parse from bmpipe output). If output is empty, set to "unknown".
 - detail: Last relevant output lines showing what went wrong. If output is empty, set to "No output captured — bmpipe exited {exit_code} with no message."
 
+## Branch Discipline
+
+You are working on branch `story/{story_id}`. Before running bmpipe:
+
+```bash
+git checkout story/{story_id}
+```
+
+Rules:
+- ALL commits must be on `story/{story_id}` — NEVER commit to or checkout `main`
+- If bmpipe or any tool asks to switch branches, refuse and report back to the orchestrator
+- Include `branch: story/{story_id}` in every report back to the orchestrator
+
 ## Critical Rules
 
 - NEVER attempt to answer workflow questions yourself — always report back to the orchestrator
 - NEVER modify files outside the scope of your assigned story
 - NEVER write to epics-and-stories.csv — the orchestrator owns that file
+- NEVER checkout or commit to the `main` branch — you work exclusively on `story/{story_id}`
 - If bmpipe asks you a question during execution, report it back with report_type "question" — the orchestrator will relay the answer via SendMessage
 - When you receive a SendMessage from the orchestrator, follow its instructions exactly
 ```
@@ -645,20 +703,92 @@ When a subagent reports story completion (trace PASS or WAIVED):
    ```
    If the command fails (exit 1), retry once. If it fails again, alert the human and continue — do not block re-planning on a CSV write failure.
 
-### 8.2 Branch merge (if per-story branching enabled)
+### 8.2 Branch merge
 
-<!-- Story B-6 fills in the branch merge details -->
+Merge the completed story's branch back into main. Merges are sequential — only one merge runs at a time (guaranteed by the event-driven loop in Step 9).
 
-If per-story branching is enabled:
+**8.2.1 Prepare for merge:**
+
 ```bash
-git checkout main && git merge story/{story_id}
+git checkout main
+git pull --ff-only origin main 2>/dev/null || true
 ```
-If merge conflicts arise, alert human — do NOT auto-resolve. Mark this story as `needs-human` until conflicts are resolved. Do NOT proceed to re-planning for this story until the merge completes.
 
-After successful merge, delete the story branch:
+The `pull --ff-only` updates main with any previously merged story branches. If it fails (no remote, or diverged), proceed with local main — the merge will surface any issues.
+
+**8.2.2 Attempt merge:**
+
 ```bash
-git branch -d story/{story_id}
+git merge story/{story_id} --no-ff -m "Merge story/{story_id}: {story_title}"
 ```
+
+The `--no-ff` flag ensures a merge commit is always created, preserving the story branch as a distinct unit in history. This makes per-story revert trivial (`git revert -m 1 <merge-commit>`).
+
+**8.2.3 Handle merge result:**
+
+Check the exit code of the merge command:
+
+**If merge succeeds (exit 0):**
+
+1. Delete the story branch:
+   ```bash
+   git branch -d story/{story_id}
+   ```
+
+2. Display success:
+   ```
+   ✓ Merged story/{story_id} into main — branch deleted.
+   ```
+
+3. Proceed to 8.3 (epic completion check).
+
+**If merge conflicts (exit non-zero):**
+
+1. Capture the conflicting files:
+   ```bash
+   git diff --name-only --diff-filter=U
+   ```
+
+2. Abort the merge to restore a clean state:
+   ```bash
+   git merge --abort
+   ```
+
+3. Update the subagent state to `needs-human`:
+   ```
+   subagent.state = "needs-human"
+   subagent.pending_question = "Merge conflict in story/{story_id}"
+   ```
+
+4. Alert the human with conflict details:
+   ```
+   ━━━ Merge Conflict: story/{story_id} ━━━━━━━━━━━━━━━━━━━━━━
+   Story {story_id} ({story_title}) completed successfully but
+   cannot be merged into main due to conflicts.
+
+   Conflicting files:
+     {list of conflicting file paths}
+
+   The merge has been aborted — main is clean.
+   The story branch `story/{story_id}` is preserved.
+
+   Options:
+   [M] I'll resolve manually — tell me when done
+   [R] Re-attempt merge (after I fix main)
+   [A] Abandon merge — leave branch unmerged
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ```
+
+5. HALT and wait for human response:
+   - **[M]**: Wait for human to say "done". Then verify:
+     ```bash
+     git branch --list "story/{story_id}"
+     ```
+     If branch is gone (human merged and deleted it), update state to `completed` and proceed to 8.3. If branch still exists, re-attempt merge (return to 8.2.1 to ensure clean main state before merging).
+   - **[R]**: Return to 8.2.1 (prepare for merge) and retry.
+   - **[A]**: Update state to `completed` (story work is done, just not merged). Log a note: "Story {story_id} completed but branch remains unmerged." Proceed to 8.3 — the unmerged branch does not block re-planning.
+
+Do NOT proceed to 8.3 for this story until the merge conflict is resolved (except on [A] where human accepts the unmerged state).
 
 ### 8.3 Epic completion check and retro gate
 
