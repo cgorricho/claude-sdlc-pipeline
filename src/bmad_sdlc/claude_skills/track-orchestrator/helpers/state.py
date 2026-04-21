@@ -15,6 +15,8 @@ Usage:
     python3 state.py generate-graph [--output PATH] [--force]  # Generate dependency graph
     python3 state.py prep-tasks [--config PATH]  # List prep tasks with status
     python3 state.py prep-blocked <story-id>     # Check if story is blocked by unverified prep task
+    python3 state.py preconditions [--config PATH]  # List preconditions with status
+    python3 state.py precondition-check <story-id>  # Check if story is blocked by unsatisfied precondition
 
 Exit codes:
     0 — success
@@ -634,6 +636,141 @@ def prep_blocked(root: Path, story_id: str, config_path: Optional[Path] = None) 
     }
 
 
+def _parse_preconditions_yaml(config_path: Path) -> list[dict]:
+    """Parse preconditions: section from the same YAML file as prep_tasks.
+
+    Uses the same simple line-based YAML parser as prep tasks since the
+    format is a flat list of key-value pairs under `preconditions:`.
+    """
+    if not config_path.exists():
+        return []
+
+    content = config_path.read_text()
+    preconditions: list[dict] = []
+    current: Optional[dict] = None
+    in_preconditions = False
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if stripped == "preconditions:":
+            in_preconditions = True
+            continue
+
+        if not in_preconditions:
+            continue
+
+        # Top-level key that isn't indented under preconditions
+        if not line[0].isspace():
+            break
+
+        # New list item
+        if stripped.startswith("- "):
+            if current:
+                preconditions.append(current)
+            current = {}
+            rest = stripped[2:]
+            if ":" in rest:
+                key, _, value = rest.partition(":")
+                current[key.strip()] = value.strip().strip('"').strip("'")
+        elif current is not None and ":" in stripped:
+            key, _, value = stripped.partition(":")
+            current[key.strip()] = value.strip().strip('"').strip("'")
+
+    if current:
+        preconditions.append(current)
+
+    return preconditions
+
+
+def preconditions_list(root: Path, config_path: Optional[Path] = None) -> list[dict]:
+    """Return list of preconditions with their current status.
+
+    Status is determined by checking the state file at
+    _bmad-output/implementation-artifacts/.prep_task_state.json
+    using keys namespaced as 'precondition:{gate}'.
+    """
+    cfg = _find_prep_tasks_config(root, config_path)
+    if not cfg:
+        return []
+
+    preconditions = _parse_preconditions_yaml(cfg)
+    if not preconditions:
+        return []
+
+    # Load state file
+    state_file = root / "_bmad-output" / "implementation-artifacts" / ".prep_task_state.json"
+    state: dict = {}
+    if state_file.exists():
+        try:
+            loaded = json.loads(state_file.read_text())
+            if isinstance(loaded, dict):
+                state = loaded
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Check if depends_on prep tasks exist
+    prep_tasks = _parse_prep_tasks_yaml(cfg)
+    prep_task_ids = {t.get("id", "") for t in prep_tasks}
+
+    result = []
+    for pc in preconditions:
+        gate = pc.get("gate", "")
+        depends_on = pc.get("depends_on", "")
+        state_key = f"precondition:{gate}"
+        pc_status = state.get(state_key, "unchecked")
+
+        # If depends_on references a nonexistent prep task, warn
+        dep_warning = ""
+        if depends_on and depends_on not in prep_task_ids:
+            dep_warning = f"depends_on '{depends_on}' not found in prep_tasks"
+
+        # Determine effective status based on depends_on
+        if pc_status == "unchecked" and depends_on and not dep_warning:
+            dep_state = state.get(depends_on, "pending")
+            if dep_state != "verified":
+                pc_status = "blocked-by-dep"
+
+        result.append({
+            "gate": gate,
+            "description": pc.get("description", ""),
+            "verify": pc.get("verify", ""),
+            "blocks_before": pc.get("blocks_before", ""),
+            "depends_on": depends_on,
+            "status": pc_status,
+            "warning": dep_warning,
+        })
+
+    return result
+
+
+def precondition_check(root: Path, story_id: str, config_path: Optional[Path] = None) -> dict:
+    """Check if a story is blocked by unsatisfied preconditions.
+
+    Returns {blocked: bool, blocking_gates: [...]} where blocking_gates
+    lists gate IDs whose blocks_before matches this story_id and are
+    not yet satisfied.
+    """
+    pcs = preconditions_list(root, config_path)
+    blocking = []
+
+    for pc in pcs:
+        if pc["blocks_before"] == story_id and pc["status"] != "satisfied":
+            blocking.append({
+                "gate": pc["gate"],
+                "status": pc["status"],
+                "depends_on": pc["depends_on"],
+            })
+
+    return {
+        "story_id": story_id,
+        "blocked": len(blocking) > 0,
+        "blocking_gates": blocking,
+    }
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__, file=sys.stderr)
@@ -732,6 +869,33 @@ def main():
                 if not config_path.is_absolute():
                     config_path = project_root / config_path
         result = prep_blocked(project_root, args[1], config_path)
+        print(json.dumps(result, indent=2))
+
+    elif cmd == "preconditions":
+        project_root = root or find_project_root()
+        config_path = None
+        if "--config" in args:
+            idx = args.index("--config")
+            if idx + 1 < len(args):
+                config_path = Path(args[idx + 1])
+                if not config_path.is_absolute():
+                    config_path = project_root / config_path
+        result = preconditions_list(project_root, config_path)
+        print(json.dumps(result, indent=2))
+
+    elif cmd == "precondition-check":
+        if len(args) < 2:
+            print("Missing story_id", file=sys.stderr)
+            sys.exit(2)
+        project_root = root or find_project_root()
+        config_path = None
+        if "--config" in args:
+            idx = args.index("--config")
+            if idx + 1 < len(args):
+                config_path = Path(args[idx + 1])
+                if not config_path.is_absolute():
+                    config_path = project_root / config_path
+        result = precondition_check(project_root, args[1], config_path)
         print(json.dumps(result, indent=2))
 
     else:

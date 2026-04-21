@@ -160,6 +160,30 @@ If prep tasks exist with status `pending`:
 3. Collect launchable prep tasks (status=pending, depends_on satisfied or empty)
 4. These will be included in the execution plan alongside stories
 
+### 3.0.1 Load preconditions
+
+Check for cross-epic preconditions in the same config file:
+
+```bash
+python3 helpers/state.py preconditions
+```
+
+Parse the JSON output. Each entry has:
+- `gate` — unique identifier (e.g., "epic-1-int-tests-green")
+- `description` — what the precondition verifies
+- `verify` — the command the orchestrator runs to check the condition
+- `blocks_before` — story ID that cannot spawn until this precondition is satisfied
+- `depends_on` — optional prep task ID that must verify before this precondition can be checked
+- `status` — `unchecked`, `satisfied`, `failed`, or `blocked-by-dep`
+- `warning` — non-empty if `depends_on` references a nonexistent prep task
+
+If the list is empty (no config file or no preconditions defined), skip to 3.1 — no preconditions to plan.
+
+If preconditions exist:
+1. Note which stories are gated by preconditions (match `blocks_before` to story IDs in the runnable list)
+2. For preconditions with `status: blocked-by-dep`, note the dependency — these will be checked automatically after the prep task verifies
+3. For preconditions with warnings, alert the human: "Precondition '{gate}' references depends_on '{depends_on}' which is not a known prep task. The verify command will run directly."
+
 ### 3.1 Select stories to launch
 
 1. **Apply layer-derived parallelism** — use the dependency graph's topological layers (computed by `state.py generate-graph`):
@@ -204,6 +228,14 @@ Execution Plan
   {If any stories blocked by prep tasks:}
   Blocked by prep: Story {story_id} (waiting on [{prep_task_id}])
 
+  {If preconditions exist:}
+  Preconditions:
+    [{gate}] {description} → blocks Story {blocks_before} (status: {status})
+    {If depends_on:} (depends on prep task [{depends_on}])
+
+  {If any stories blocked by preconditions:}
+  Blocked by precondition: Story {story_id} (waiting on [{gate}])
+
 Proceed? [Y]es / [N]o
 ```
 
@@ -218,6 +250,67 @@ HALT — wait for user confirmation before spawning. If user says no, return to 
 For each story in the approved plan, in order:
 
 ### 4.1 Pre-spawn setup (per story)
+
+**4.1.0 Precondition gate:**
+
+Before creating the story branch, check if this story is blocked by preconditions:
+
+```bash
+python3 helpers/state.py precondition-check {story_id}
+```
+
+Parse the JSON output. If `blocked: true`:
+
+For each blocking gate in `blocking_gates`:
+- If `status` is `blocked-by-dep` — the prep task dependency hasn't verified yet. Skip this story silently:
+  ```
+  Story {story_id} blocked by precondition [{gate}] — waiting on prep task [{depends_on}].
+  ```
+  Remove this story from the current batch. It will be re-evaluated in Step 8.4 after the prep task completes.
+
+- If `status` is `unchecked` or `failed` — the dependency is satisfied (or absent), so run the verify command directly:
+  ```bash
+  {verify_command from the precondition}
+  ```
+
+  **If verify exits 0 (success):**
+  1. Update the state file:
+     ```bash
+     python3 -c "
+     import json; from pathlib import Path
+     p = Path('_bmad-output/implementation-artifacts/.prep_task_state.json')
+     state = json.loads(p.read_text()) if p.exists() else {}
+     state['precondition:{gate}'] = 'satisfied'
+     p.write_text(json.dumps(state, indent=2))
+     "
+     ```
+  2. Display: `Precondition [{gate}] satisfied. Story {story_id} cleared to proceed.`
+  3. Continue to branch creation below.
+
+  **If verify exits non-zero (failure):**
+  1. Update the state file with `failed` status.
+  2. Alert the human:
+     ```
+     ━━━ Precondition Failed ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Gate: [{gate}] {description}
+     Verify command: {verify_command}
+     Exit code: {exit_code}
+     Output: {last 20 lines of verify output}
+
+     Story {story_id} is blocked by this precondition.
+
+     Options:
+     [R] Retry verify (after manual fix)
+     [O] Override — mark precondition as satisfied
+     [S] Skip — remove story from this batch
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     ```
+  3. HALT and wait for human:
+     - **[R]**: Re-run the verify command. Route result through this same logic.
+     - **[O]**: Override — set state to `satisfied`, update state file, proceed.
+     - **[S]**: Remove story from batch. Continue with remaining stories.
+
+If ALL preconditions for this story are satisfied, proceed to branch creation:
 
 Create an isolated branch for this story before spawning the subagent:
 
@@ -1078,6 +1171,21 @@ After CSV update (and branch merge, and retro gate if applicable):
    Story {story_id} blocked by prep task [{blocking_task_id}] — skipping until verified.
    ```
 
+2.1. **Check precondition blocking on each remaining runnable story:**
+   For each story still in the runnable list, check preconditions:
+   ```bash
+   python3 helpers/state.py precondition-check {story_id}
+   ```
+   If `blocked: true`:
+   - For gates with `status: blocked-by-dep` — remove story from runnable list silently (prep task not ready).
+   - For gates with `status: unchecked` or `failed` — the dependency is satisfied or absent. Run the verify command:
+     ```bash
+     {verify_command}
+     ```
+     If verify passes → update state to `satisfied` (same state file update as Step 4.1.0). Re-check remaining gates for this story.
+     If verify fails → alert human (same flow as Step 4.1.0 failure). Remove story from runnable list.
+   - A story is only unblocked when ALL its preconditions are `satisfied`.
+
 3. **Check for launchable prep tasks:**
    ```bash
    python3 helpers/state.py prep-tasks
@@ -1247,6 +1355,15 @@ avg_story_duration: mean of per-story durations (completed stories only)
   | {prep_task_id} | {description} | {verified/failed} | {duration} | Story {deadline_before} |
 
   {If no prep tasks: "No prep tasks configured for this session."}
+
+## Preconditions
+
+  {If any preconditions were tracked:}
+  | Gate | Description | Status | Blocks | Depends On |
+  |------|-------------|--------|--------|------------|
+  | {gate} | {description} | {satisfied/failed/blocked-by-dep} | Story {blocks_before} | {depends_on or "—"} |
+
+  {If no preconditions: "No preconditions configured for this session."}
 
 ## Deferred Work
 
