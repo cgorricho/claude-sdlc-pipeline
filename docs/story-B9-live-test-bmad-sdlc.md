@@ -1,16 +1,43 @@
 ---
 created: 2026-04-22
+updated: 2026-04-22
 status: open
-type: design-issue
+type: story
+story-id: B-9
 severity: critical
-source: Atlas bmpipe setup — workflow names mismatch between bmpipe defaults and installed BMAD skills
+source: Atlas Epic 2 — first live orchestrator run against a real project
 relates-to:
   - docs/design-subagent-orchestrator.md
+  - docs/learnings-epic-1-retro.md
+  - docs/issue-review-classification-gaps.md
   - src/bmad_sdlc/cli.py
   - src/bmad_sdlc/orchestrator.py
+  - src/bmad_sdlc/config.py
 ---
 
-# Design Issue: Workflow Name Alignment — bmpipe Must Validate Against Installed BMAD
+# Story B-9: Live Test bmad-sdlc — Issues from First Real Orchestration Run
+
+First live test of bmpipe + orchestrator skill against Atlas (Epic 2, Story 2.2). Two blocking infrastructure bugs discovered and one pre-flight gap. This story captures all findings and defines the required pre-flight checklist.
+
+---
+
+## Bug 1: Project Root Resolution (FIXED)
+
+### What Happened
+
+`bmpipe run --story 2-2` invoked from `/home/cgorricho/apps/atlas/` resolved config at `/home/cgorricho/apps/bmad-sdlc/.bmpipe/config.yaml` — the bmpipe install directory, not the target project.
+
+### Root Cause
+
+`config.py:411` hardcoded `_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent` — resolved to bmpipe's own source tree, not CWD.
+
+### Fix Applied
+
+Replaced with `_find_project_root()` — walks up from `os.getcwd()` looking for `.bmpipe/config.yaml`. Matches git/npm/cargo behavior. Committed: `2d6328e`.
+
+---
+
+## Bug 2: Workflow Name Mismatch (DOCUMENTED — fix pending)
 
 ## Problem
 
@@ -178,8 +205,42 @@ Workflow alignment check...
   Running pipeline for story 2-2...
 ```
 
-## Relationship to Orchestrator Design
+---
 
-The orchestrator skill's SKILL.md already specifies a 3-tier BMAD version detection strategy. This issue extends that principle to the CLI layer: **bmpipe itself must be BMAD-version-aware**, not just the orchestrator skill.
+## Required: Orchestrator Pre-Flight Checklist
 
-The orchestrator's subagents invoke `bmpipe run`, which invokes workflows. If bmpipe can't find the workflows, the subagent fails. Validation at the bmpipe layer prevents this failure from propagating up through the orchestrator.
+Both bugs would have been caught by a proper pre-flight check before the orchestrator spawns any subagent. The following checklist must run before the first workflow invocation:
+
+| # | Check | What It Validates | Failure Mode Without It |
+|---|-------|-------------------|------------------------|
+| 1 | `bmpipe --version` responds | bmpipe is installed and on PATH | Subagent runs `bmpipe run` → command not found |
+| 2 | `.bmpipe/config.yaml` exists **in the project CWD** (not in bmpipe's install dir) | Config resolves to the correct project | bmpipe reads wrong config, runs against wrong project (Bug 1) |
+| 3 | Workflow names in config match installed BMAD skills | Every `pipeline_steps` entry has a resolvable skill | bmpipe invokes non-existent slash command, Claude session produces no output (Bug 2) |
+| 4 | Every `pipeline_steps` entry has a `workflows` mapping | ATDD step (or any custom step) has a skill name configured | Pipeline step runs with no skill → undefined behavior |
+| 5 | `bmpipe validate` passes | Config syntax, Claude CLI, build command all present | Various failures deep in pipeline |
+| 6 | Sprint-status.yaml exists and parses | Orchestrator can read story states | Orchestrator can't identify runnable stories |
+| 7 | Epics-and-stories.csv exists and parses | Orchestrator can read dependencies | Dependency graph generation fails |
+
+### Integration Points
+
+| Component | When Checklist Runs |
+|---|---|
+| `bmpipe run` | Before first workflow invocation (checks 1-5) |
+| `bmpipe validate` | On explicit invocation (checks 1-5, partial) |
+| `bmpipe init` | Auto-resolves checks 2-4 at setup time |
+| Orchestrator skill (workflow.md Step 2) | Before spawning any subagent (all 7 checks) |
+
+### Lesson
+
+The orchestrator skill's SKILL.md specifies a 3-tier BMAD version detection strategy. This story extends that principle: **bmpipe itself must be BMAD-version-aware**, not just the orchestrator skill. The orchestrator's subagents invoke `bmpipe run`, which invokes workflows. If bmpipe can't find the workflows, the subagent fails. Validation at the bmpipe layer prevents failures from propagating up through the orchestrator.
+
+---
+
+## Status
+
+| Item | Status |
+|------|--------|
+| Bug 1 (project root) | FIXED — committed `2d6328e` |
+| Bug 2 (workflow names) | DOCUMENTED — implementation pending |
+| Pre-flight checklist | DOCUMENTED — implementation pending |
+| Orchestrator retry after fix | Pending — resume Story 2.2 after confirming both fixes |
