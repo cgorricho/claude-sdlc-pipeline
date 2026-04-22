@@ -236,11 +236,32 @@ The orchestrator skill's SKILL.md specifies a 3-tier BMAD version detection stra
 
 ---
 
+## Bug 1b: project.root Relative Resolution (FIXED)
+
+### What Happened
+
+After Bug 1 fix, `bmpipe validate` passed but `bmpipe run` still resolved paths incorrectly. Run directories were created under `.bmpipe/` instead of the project root.
+
+### Root Cause
+
+`config.py:376-377` resolved `project.root` relative to `config_dir` (the `.bmpipe/` directory) instead of `config_dir.parent` (the project root). So `project.root: "."` resolved to `/project/.bmpipe/` instead of `/project/`.
+
+### Fix Applied
+
+Changed resolution base from `config_dir` to `config_dir.parent`. `project.root: "."` now correctly means "the directory containing `.bmpipe/`" — the project root. Committed: `3e01b09`.
+
+### Design Principle
+
+Users should never have to write `project.root: ".."`. The `.` means "my project root" — the directory where I work, not the config directory. This matches how every other tool resolves relative paths in config files nested inside dot-directories.
+
+---
+
 ## Status
 
 | Item | Status |
 |------|--------|
-| Bug 1 (project root) | FIXED — committed `2d6328e` |
+| Bug 1 (project root CWD search) | FIXED — committed `2d6328e` |
+| Bug 1b (project.root relative resolution) | FIXED — committed `3e01b09` |
 | Bug 2 (workflow names) | DOCUMENTED — implementation pending |
 | Pre-flight checklist | DOCUMENTED — implementation pending |
-| Orchestrator retry after fix | Pending — resume Story 2.2 after confirming both fixes |
+| Orchestrator retry after fixes | In progress — Story 2.2 resuming |
