@@ -370,11 +370,13 @@ def load_config(path: Path) -> Config:
             raise TypeError("Config key 'plugins' expects list, got " + type(raw["plugins"]).__name__)
         kwargs["plugins"] = raw["plugins"]
 
-    # Resolve project root relative to config file
+    # Resolve project root relative to the directory *containing* .bmpipe/
+    # (not relative to .bmpipe/ itself). project.root: "." means the project root.
     project_section = kwargs.get("project", ProjectConfig())
     raw_root = project_section.root if isinstance(project_section, ProjectConfig) else "."
     config_dir = path.parent  # .bmpipe/
-    project_root = str((config_dir / raw_root).resolve())
+    project_dir = config_dir.parent  # the actual project root
+    project_root = str((project_dir / raw_root).resolve())
 
     # Update project with resolved root
     if isinstance(project_section, ProjectConfig):
