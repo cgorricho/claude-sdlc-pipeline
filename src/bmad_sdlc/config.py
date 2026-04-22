@@ -408,16 +408,32 @@ def load_config(path: Path) -> Config:
 # Singleton accessor
 # ---------------------------------------------------------------------------
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _config_instance: Config | None = None
+
+
+def _find_project_root() -> Path:
+    """Walk up from CWD to find the nearest directory containing .bmpipe/config.yaml.
+
+    Mimics git/npm/cargo project root detection. Falls back to CWD if no
+    .bmpipe/config.yaml is found anywhere in the ancestor chain.
+    """
+    current = Path.cwd().resolve()
+    while True:
+        if (current / ".bmpipe" / "config.yaml").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            # Reached filesystem root without finding config
+            return Path.cwd().resolve()
+        current = parent
 
 
 def get_config(config_path: Path | None = None) -> Config:
     """Return the singleton Config instance, loading from disk on first call.
 
     Args:
-        config_path: Optional explicit path. If None, uses
-            PROJECT_ROOT / ".bmpipe" / "config.yaml".
+        config_path: Optional explicit path. If None, walks up from CWD
+            to find .bmpipe/config.yaml (git-style root detection).
 
     Returns:
         Frozen Config instance.
@@ -427,7 +443,8 @@ def get_config(config_path: Path | None = None) -> Config:
         return _config_instance
 
     if config_path is None:
-        config_path = _PROJECT_ROOT / ".bmpipe" / "config.yaml"
+        project_root = _find_project_root()
+        config_path = project_root / ".bmpipe" / "config.yaml"
 
     _config_instance = load_config(config_path)
     return _config_instance
