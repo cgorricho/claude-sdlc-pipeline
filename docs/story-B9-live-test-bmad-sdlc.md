@@ -256,6 +256,38 @@ Users should never have to write `project.root: ".."`. The `.` means "my project
 
 ---
 
+## Bug 3: --verbose Kills Subagent (Context Window Overflow)
+
+### What Happened
+
+Orchestrator spawned subagent with `bmpipe run --story 2-2 --verbose`. bmpipe's `--verbose` flag streams full Claude output through stdout. The create-story step generated a 760-line story spec, producing ~100K+ streamed tokens. The subagent's context window filled up and it terminated, killing the bmpipe process mid-pipeline.
+
+### Root Cause
+
+`--verbose` is designed for human terminal use — you watch the output scroll by. When a subagent runs bmpipe, the streamed output becomes tool result content in the subagent's context. A 30-60 minute pipeline streaming Claude's full output generates hundreds of thousands of tokens — far exceeding any reasonable context window.
+
+### Fix
+
+**The orchestrator must NEVER pass `--verbose` to subagent-invoked bmpipe runs.** Verbose is for manual terminal use only. Subagents should run `bmpipe run --story {id}` (no `--verbose`). bmpipe still logs to `.bmpipe/runs/{timestamp}/pipeline.log` — the orchestrator can read the log file after completion if details are needed.
+
+### Design Rule
+
+Add to orchestrator workflow.md Step 4 (spawn subagents): "NEVER include `--verbose` in subagent bmpipe invocations. Verbose output fills the subagent's context window and causes premature termination."
+
+---
+
+## Bug 4: Story ID Format (Dot vs Dash)
+
+### What Happened
+
+The orchestrator's state.py returns `story_id: "2.2"` (dot form from CSV). bmpipe expects `--story 2-2` (dash form). First invocation used `bmpipe run --story 2.2` which failed silently.
+
+### Fix
+
+Orchestrator normalizes story ID before passing to bmpipe: `story_id.replace(".", "-")`. Noted for workflow.md template update.
+
+---
+
 ## Status
 
 | Item | Status |
@@ -263,5 +295,7 @@ Users should never have to write `project.root: ".."`. The `.` means "my project
 | Bug 1 (project root CWD search) | FIXED — committed `2d6328e` |
 | Bug 1b (project.root relative resolution) | FIXED — committed `3e01b09` |
 | Bug 2 (workflow names) | DOCUMENTED — implementation pending |
+| Bug 3 (--verbose context overflow) | DOCUMENTED — orchestrator must never use --verbose with subagents |
+| Bug 4 (dot vs dash story ID) | DOCUMENTED — orchestrator must normalize before invoking bmpipe |
 | Pre-flight checklist | DOCUMENTED — implementation pending |
-| Orchestrator retry after fixes | In progress — Story 2.2 resuming |
+| Orchestrator retry | In progress — Story 2.2 retry #4 without --verbose |
