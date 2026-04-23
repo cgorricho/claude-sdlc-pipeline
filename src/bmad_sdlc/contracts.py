@@ -46,15 +46,30 @@ def find_story_file(story_key: str, impl_dir: Path) -> Path | None:
 def count_acceptance_criteria(text: str) -> int:
     """Count distinct acceptance criteria identifiers in story text.
 
-    Phase 2 (spec 4.4.1): Format-agnostic extraction. Finds AC-?\\d+
-    regardless of surrounding markup (headers, bold, inline, etc.).
-    Deduplicates by AC number.
+    Phase 2 (spec 4.4.1): Format-agnostic extraction. Supports multiple formats:
+    - AC-style: AC1, AC-1, AC 1, AC-01 (deduplicated by number)
+    - BDD-style: numbered items under '## Acceptance Criteria' heading
+      (e.g., '1. **Given**', '2. **Given**')
     """
-    # Find all AC identifiers: AC1, AC-1, AC 1, AC-01, etc.
-    matches = re.findall(r"AC[-\s]?(\d+)", text)
-    # Deduplicate by number (AC1 and AC-1 and AC 1 are the same)
-    unique_ids = set(int(m) for m in matches)
-    return len(unique_ids)
+    # Strategy 1: Find AC identifiers (AC1, AC-1, AC 1, etc.)
+    ac_matches = re.findall(r"AC[-\s]?(\d+)", text)
+    ac_ids = set(int(m) for m in ac_matches)
+
+    # Strategy 2: Find numbered BDD criteria under Acceptance Criteria heading
+    bdd_count = 0
+    in_ac_section = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"^#{1,3}\s+[Aa]cceptance\s+[Cc]riteria", stripped):
+            in_ac_section = True
+            continue
+        if in_ac_section and re.match(r"^#{1,3}\s+", stripped) and "acceptance" not in stripped.lower():
+            in_ac_section = False
+            continue
+        if in_ac_section and re.match(r"^\d+\.\s+\*\*[Gg]iven\*\*", stripped):
+            bdd_count += 1
+
+    return max(len(ac_ids), bdd_count)
 
 
 def validate_create_story(story_key: str, impl_dir: Path,
