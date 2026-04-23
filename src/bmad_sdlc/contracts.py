@@ -200,20 +200,32 @@ def validate_code_review(story_key: str, impl_dir: Path,
     return ContractResult(passed=True)
 
 
-def validate_atdd(story_key: str, test_artifacts_dir: Path) -> ContractResult:
+def validate_atdd(story_key: str, test_artifacts_dir: Path,
+                   project_root: Path | None = None) -> ContractResult:
     """Validate atdd outputs match contract.
 
     Contract:
-      - At least one test file matching {story_key}-* exists in test_artifacts_dir
-      - Match is a file (not a directory)
-      - Test file is non-empty
+      - At least one ATDD artifact exists for this story, in either:
+        (a) test_artifacts_dir matching *{story_key}* (checklist, test specs)
+        (b) tests/acceptance/ matching story-{story_key}* (acceptance test file)
+      - Matched file is non-empty
     """
     if not test_artifacts_dir.exists():
         return ContractResult(passed=False, error=f"Test artifacts directory not found: {test_artifacts_dir}")
 
-    matches = [f for f in test_artifacts_dir.glob(f"{story_key}-*") if f.is_file()]
+    # Strategy 1: check test_artifacts_dir for any file containing the story key
+    matches = [f for f in test_artifacts_dir.glob(f"*{story_key}*") if f.is_file()]
+
+    # Strategy 2: check tests/acceptance/ for the acceptance test file
+    if project_root:
+        acceptance_dir = project_root / "tests" / "acceptance"
+        if acceptance_dir.exists():
+            matches.extend(
+                f for f in acceptance_dir.glob(f"story-{story_key}*") if f.is_file()
+            )
+
     if not matches:
-        return ContractResult(passed=False, error=f"No test files found matching {story_key}-* in {test_artifacts_dir}")
+        return ContractResult(passed=False, error=f"No ATDD artifacts found for {story_key} in {test_artifacts_dir} or tests/acceptance/")
 
     empty_files = [f for f in matches if f.stat().st_size == 0]
     if empty_files:

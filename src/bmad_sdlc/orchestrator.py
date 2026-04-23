@@ -290,7 +290,7 @@ def run_pipeline(
         if exit_code != 0:
             log.warning(f"  ATDD workflow exited with code {exit_code}")
 
-        result = validate_atdd(story_key, test_artifacts)
+        result = validate_atdd(story_key, test_artifacts, project_root=project_root)
         if not result.passed:
             log.error(f"Contract violation: {result.error}")
             fail_step(run_log, step_log, run_log_path,
