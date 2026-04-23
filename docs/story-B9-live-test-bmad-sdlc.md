@@ -288,6 +288,56 @@ Orchestrator normalizes story ID before passing to bmpipe: `story_id.replace("."
 
 ---
 
+## Bug 5: Claude Code Subagent Hard 10-Minute Budget (ARCHITECTURE CHANGE)
+
+### What Happened
+
+Retry #3 (with `--verbose`) and retry #4 (without `--verbose`) both terminated at ~613s and ~622s respectively. The subagent was killed by Claude Code regardless of token consumption. bmpipe's pipeline needs 30-60 minutes — 3-6x longer than the subagent's lifespan.
+
+### Root Cause
+
+Claude Code background subagents (spawned via the Agent tool with `run_in_background: true`) have a hard ~10-minute wall-clock budget. This is a platform constraint, not configurable. It applies regardless of token usage — even a subagent blocked on a Bash tool call consuming zero tokens gets killed at ~10 minutes.
+
+### Impact
+
+**The subagent-based orchestration architecture (design-subagent-orchestrator.md) cannot execute bmpipe pipelines.** The core assumption — "subagents run bmpipe as a primitive, report back on completion" — is invalidated by the 10-minute limit. A 5-step pipeline that takes 30-60 minutes will always be killed before completion.
+
+### Architecture Pivot
+
+The orchestrator skill's role changes from **execution** to **planning + classification + state management**:
+
+| Before (subagent execution) | After (plan + classify) |
+|---|---|
+| Orchestrator spawns subagent → subagent runs bmpipe → subagent reports back | Orchestrator plans what to run → human/terminal runs bmpipe → orchestrator reads results + classifies findings |
+| Orchestrator is autonomous end-to-end | Orchestrator is autonomous for decisions, human-assisted for execution |
+| Subagents are the execution substrate | Terminals (or nohup/tmux) are the execution substrate |
+
+What the orchestrator still does (no change):
+- Generate/read dependency graph
+- Identify runnable stories
+- Plan parallel tracks
+- Classify review findings using LLM reasoning (6-category taxonomy)
+- Coordinate patch application via SendMessage (if session continues)
+- Update CSV (single writer)
+- Detect epic completion, trigger retro notification
+
+What the orchestrator no longer does:
+- Spawn background subagents for bmpipe execution
+- Monitor subagent completion
+- Run the full pipeline autonomously
+
+### The Human's New Role
+
+The human runs `bmpipe run --story {id}` in a terminal (or multiple terminals for parallel stories). When bmpipe finishes, the human tells the orchestrator "story 2-2 pipeline done" and the orchestrator reads the results, classifies findings, and handles state updates.
+
+This is the same workflow the human was already doing before the orchestrator existed — but now the orchestrator handles the classification intelligence (which was the most valuable part) while the human handles execution (which they were doing anyway).
+
+### Future: When Subagent Budgets Increase
+
+If Claude Code increases the subagent budget beyond 60 minutes in a future release, the original subagent architecture becomes viable again with zero design changes. The `design-subagent-orchestrator.md` design is correct — it's just ahead of the platform's current limits.
+
+---
+
 ## Status
 
 | Item | Status |
@@ -295,7 +345,8 @@ Orchestrator normalizes story ID before passing to bmpipe: `story_id.replace("."
 | Bug 1 (project root CWD search) | FIXED — committed `2d6328e` |
 | Bug 1b (project.root relative resolution) | FIXED — committed `3e01b09` |
 | Bug 2 (workflow names) | DOCUMENTED — implementation pending |
-| Bug 3 (--verbose context overflow) | DOCUMENTED — orchestrator must never use --verbose with subagents |
+| Bug 3 (--verbose context overflow) | DOCUMENTED — moot given Bug 5, but still a valid constraint |
 | Bug 4 (dot vs dash story ID) | DOCUMENTED — orchestrator must normalize before invoking bmpipe |
+| Bug 5 (10-min subagent budget) | DOCUMENTED — architecture pivot: orchestrator plans + classifies, human/terminal executes |
 | Pre-flight checklist | DOCUMENTED — implementation pending |
-| Orchestrator retry | In progress — Story 2.2 retry #4 without --verbose |
+| Orchestrator role | Pivoted from execution to planning + classification + state management |
