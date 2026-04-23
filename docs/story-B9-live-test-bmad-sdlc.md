@@ -302,9 +302,25 @@ Claude Code background subagents (spawned via the Agent tool with `run_in_backgr
 
 The subagent-based orchestration architecture (`design-subagent-orchestrator.md`) assumes subagents can run bmpipe pipelines (30-60 minutes) to completion. The 10-minute limit prevents this.
 
+### Full Timeline of Attempts
+
+| Retry | Strategy | Result | Duration |
+|-------|----------|--------|----------|
+| #1 | Subagent with `--verbose` | Killed — context overflow from streamed output | ~613s |
+| #2 | Subagent without `--verbose` | Killed — same 10-min wall clock | ~622s |
+| #3 | Subagent without `--verbose`, `API_TIMEOUT_MS=7200000` | Failed on CSV status mismatch (Bug 6) before reaching timeout boundary | <30s |
+| #4 | Subagent without `--verbose`, `API_TIMEOUT_MS=7200000`, CSV fixed | Subagent ran `bmpipe` with `run_in_background`, then exited — killing bmpipe | <60s |
+| #5 | Orchestrator runs bmpipe directly in foreground | Not attempted — session killed by human after 5 failed strategies |
+
+Five retries. Three different strategies. All failed. The subagent-per-story pattern is fundamentally incompatible with long-running bmpipe pipelines under current Claude Code constraints.
+
 ### Solution
 
-TBD — under evaluation.
+**Claude Code Agent Teams** — an experimental feature providing full Claude Code sessions (no timeout), peer-to-peer messaging, shared task lists with dependency tracking, and git worktree isolation per teammate.
+
+See `docs/design-agent-teams-orchestrator.md` for the comprehensive design.
+
+Until Agent Teams are implemented in the orchestrator skill, bmpipe runs manually in terminals. The human executes `bmpipe run --story {id}`, the orchestrator skill handles planning and classification.
 
 ---
 
@@ -317,5 +333,6 @@ TBD — under evaluation.
 | Bug 2 (workflow names) | DOCUMENTED — implementation pending |
 | Bug 3 (--verbose context overflow) | DOCUMENTED — moot given Bug 5, but still a valid constraint |
 | Bug 4 (dot vs dash story ID) | DOCUMENTED — orchestrator must normalize before invoking bmpipe |
-| Bug 5 (10-min subagent budget) | DOCUMENTED — solution TBD |
+| Bug 5 (10-min subagent budget) | SOLVED — Agent Teams design (design-agent-teams-orchestrator.md). Manual terminal execution as interim. |
+| Bug 6 (CSV "Not Started" vs "backlog") | FIXED by orchestrator inline — CSV status normalization needed in bmpipe init or state.py |
 | Pre-flight checklist | DOCUMENTED — implementation pending |
