@@ -1,16 +1,35 @@
 ---
 created: 2026-04-23
-status: proposed
+status: rejected
+rejected_on: 2026-04-23
+rejected_in: docs/party-mode-2026-04-23-subagent-vs-agent-teams-orchestrator-review.md
 type: architecture-design
-supersedes: docs/design-subagent-orchestrator.md
 source: Claude Code Agent Teams documentation + Atlas Story B-9 live test findings
 relates-to:
   - docs/story-B9-live-test-bmad-sdlc.md
+  - docs/party-mode-2026-04-23-subagent-vs-agent-teams-orchestrator-review.md
   - docs/learnings-epic-1-retro.md
   - docs/issue-review-classification-gaps.md
 ---
 
-# Agent Teams-Based Track Orchestrator — Comprehensive Design
+# Agent Teams-Based Track Orchestrator — REJECTED (2026-04-23)
+
+## ⚠️ Rejected — Do Not Implement
+
+This proposal was **considered and rejected** in the party-mode session of 2026-04-23. The deciding evidence is recorded verbatim in `docs/party-mode-2026-04-23-subagent-vs-agent-teams-orchestrator-review.md`. Subagents — not Agent Teams — remain the architecture for the track orchestrator.
+
+**Why rejected (summary):**
+
+1. **The premise was wrong.** The "subagent 10-minute timeout" that motivated this redesign is not a subagent lifetime limit — it is the Bash tool's hard 10-minute ceiling (Issues #25881, #34138). Subagents themselves can live 90+ minutes (Issue #36727 documents 1.5 hours / 234 tool calls).
+2. **Subagents already solve the cited gaps.** Subagent docs now include `isolation: worktree` (closes Gap 9 + Gap 10) and `SendMessage` (closes the bidirectional-comms requirement) — neither requires Agent Teams.
+3. **Agent Teams self-claiming bypasses the orchestrator's dependency logic**, which is explicitly required behaviour (epic/story dependency graph must be respected).
+4. **Risk asymmetry.** Agent Teams have 5 documented risks (no session resumption, task-status lag, one team per session, experimental, higher token cost). Subagents have manageable constraints once the Bash-tool ceiling is understood.
+
+**What replaced it:** Story B-9 (`spec-b9-direct-skill-invocation.md`) — keep subagents, but invoke the 5 BMAD workflows (`/bmad-create-story` → `/bmad-testarch-atdd` → `/bmad-dev-story` → `/bmad-code-review` → `/bmad-testarch-trace`) directly instead of wrapping `bmpipe run` in a single long Bash call. Each skill emits many short tool calls under the 10-minute per-call ceiling.
+
+The body below is preserved as a historical record of the proposal. **Do not treat any section below this banner as the active design.**
+
+---
 
 ## Executive Summary
 
@@ -366,3 +385,87 @@ Validates:
 | `story-B9-live-test-bmad-sdlc.md` | Active — Bug 5 solution is now "Agent Teams" |
 | `learnings-epic-1-retro.md` | Still valid — prep tasks, layer-derived parallelism, cross-epic gates all apply |
 | `issue-review-classification-gaps.md` + gaps from 1.3/1.8 | Still valid — 6-category taxonomy unchanged, now delivered via teammate messaging |
+
+---
+
+## Party Mode Review — 2026-04-23: Architecture Decision
+
+### Decision: Subagents, Not Agent Teams
+
+After a full party mode review with Winston (Architect), Amelia (Developer), Murat (Test Architect), John (PM), and Wendy (Workflow Builder), the team reached a unanimous conclusion: **the existing subagent-based orchestrator is the correct architecture for bmpipe**. The Agent Teams rewrite proposed in this document is NOT being pursued.
+
+### Rationale (fact-based, from official Claude Code documentation)
+
+**1. The subagent timeout may no longer exist.**
+
+The Claude Code subagent documentation (April 2026) states: "Claude Code previously had a hardcoded 5-minute request timeout that aborted slow backends... This was recently fixed to respect configurable timeout settings." The B-9 live test (April 22) may have hit the old timeout. Configurable Bash timeouts now support up to 2 hours (`BASH_MAX_TIMEOUT_MS=7200000`). This must be empirically validated — see § Timeout Validation Test below.
+
+**2. Subagents now support `isolation: worktree`.**
+
+The subagent documentation confirms `isolation: "worktree"` gives each subagent its own git worktree. This solves Gap 9 (cross-story contamination) and Gap 10 (config ownership) — the same gaps this document attributed exclusively to Agent Teams.
+
+**3. SendMessage works with subagents when Agent Teams flag is enabled.**
+
+The subagent documentation states: "The SendMessage tool is only available when agent teams are enabled via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`." Enabling the flag for SendMessage only gives bidirectional orchestrator ↔ subagent communication without the full Agent Teams overhead (no shared task list, no self-claiming teammates, no extra token cost).
+
+**4. bmpipe's execution pattern is a textbook subagent use case.**
+
+The Agent Teams documentation explicitly states: "For sequential tasks, same-file edits, or work with many dependencies, a single session or subagents are more effective" and "Use subagents when you need quick, focused workers that report back. Use agent teams when teammates need to share findings, challenge each other, and coordinate on their own."
+
+Each bmpipe worker runs one sequential pipeline (`create → atdd → dev → review → trace`). Workers don't collaborate with each other. They report back to the orchestrator. This matches the subagent pattern exactly.
+
+**5. Agent Teams introduce documented risks that subagents avoid.**
+
+From the official Agent Teams documentation:
+- "No session resumption with in-process teammates" — lead crash loses all work
+- "Task status can lag: teammates sometimes fail to mark tasks as completed, which blocks dependent tasks" — dangerous for dependency-driven orchestration
+- "One team per session" — can't transition between epics without cleanup
+- "Experimental" — semantics may change between releases
+- "Token usage scales linearly with the number of active teammates" — significantly higher cost
+
+**6. Agent Teams self-claiming bypasses orchestrator dependency logic.**
+
+The Agent Teams documentation says: "teammates can self-claim: after finishing a task, a teammate picks up the next unassigned, unblocked task on its own." This would bypass `state.py`'s topological layer enforcement, potentially spawning stories before their dependencies complete.
+
+### Corrected Comparison Table
+
+| Constraint | Subagents (April 2026) | Agent Teams |
+|---|---|---|
+| **Lifetime** | Request timeout fixed; Bash timeouts configurable to 2hr. Empirical validation pending. | Full sessions — no limit |
+| **Isolation** | `isolation: worktree` — per-subagent git worktree | Per-teammate git worktree |
+| **Communication** | One-shot unless Agent Teams flag enabled → then SendMessage works | Peer-to-peer messaging native |
+| **Dependency tracking** | state.py (custom, already built, 48/48 ACs passing) | Shared task list (3 states only, status can lag) |
+| **Token cost** | Lower — docs explicitly state | "Significantly more tokens" — direct quote |
+| **Stability** | Stable, production feature | Experimental, disabled by default |
+| **Sequential tasks** | "For sequential tasks... subagents are more effective" — direct quote | Docs say use for "complex work requiring discussion and collaboration" |
+
+### Design Gap Found: SendMessage Prerequisite
+
+The existing orchestrator workflow.md uses SendMessage extensively (7 distinct interaction patterns across Steps 6, 7, and the patch retry loop), but **nothing in the install/init/validate pipeline ensures `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is set**. Without this flag, SendMessage does not exist and all bidirectional communication becomes dead code.
+
+**Fix applied (2026-04-23):** Added the flag to both Atlas and bmad-sdlc `.claude/settings.json`.
+
+**Required in tech spec:**
+1. `bmpipe init` must add the Agent Teams env flag to `.claude/settings.json`
+2. `bmpipe validate` must check the flag is present
+3. Orchestrator pre-flight checklist (workflow.md Step 2) must verify SendMessage availability
+
+### Remaining Work Items
+
+| # | Item | Type | Size |
+|---|------|------|------|
+| 1 | Add `isolation: worktree` to subagent spawn | workflow.md Step 4.3 | One parameter |
+| 2 | Add Agent Teams flag check to pre-flight | workflow.md Step 2 | ~5 lines |
+| 3 | Add flag to `bmpipe init` + `bmpipe validate` | cli.py / config.py | Small feature |
+| 4 | Workflow name validation (Bug 2 from B-9) | cli.py / config.py | Medium — already fully spec'd in B-9 doc |
+| 5 | Story ID dot→dash normalization (Bug 4) | state.py | One-liner |
+| 6 | Empirical subagent timeout validation | test-orchestrator skill | See § Timeout Validation Test |
+| 7 | Update this document status | This file | Done (this section) |
+
+### Timeout Validation Test
+
+A dedicated `/test-orchestrator` skill has been created to empirically validate subagent lifetime limits. The test spawns 10 subagents with graduated durations from 15 minutes to 1 hour 45 minutes, each running a deterministic fibonacci payload that produces one number every 30 seconds. If any subagent is killed by a timeout, the fibonacci count proves the exact wall-clock survival time. See `src/bmad_sdlc/claude_skills/test-orchestrator/` for the full test implementation.
+
+### Status of This Document
+
+**Status: SUPERSEDED-BY-REVIEW.** The Agent Teams architecture proposed in this document is not being implemented. The existing subagent-based orchestrator (`src/bmad_sdlc/claude_skills/track-orchestrator/`) is confirmed as the correct design, with the targeted fixes listed above. This document is retained for its analysis of gaps 5/9/10 and the comparison tables, which informed the final decision.

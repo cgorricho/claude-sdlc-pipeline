@@ -1,0 +1,71 @@
+# Sprint Status — bmad-sdlc
+# Bootstrapped on 2026-04-26 from spec frontmatter, git history, and epic docs.
+# Source of truth for /bmad-sprint-status; updated by /bmad-quick-dev sync-sprint-status step.
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:    backlog | in-progress | done
+# Story Status:   backlog | ready-for-dev | in-progress | review | done
+# Retro Status:   optional | done
+
+generated: 2026-04-26
+last_updated: 2026-04-26
+project: bmad-sdlc
+project_key: BMSD
+tracking_system: file-system
+story_location: "{implementation_artifacts}"
+
+development_status:
+  # ─── Epic 1: Standalone bmad-sdlc package (Stories 1–7 + TEA bootstrap) ───
+  epic-1: done
+  1-1-scaffold: done                      # spec-1-scaffold.md            impl: e25b4a1+ (rename train 595b903)
+  1-2-config-system: done                 # spec-2-config-system.md       baseline 1a96d47
+  1-3-cli: done                           # spec-3-cli.md                 baseline 24382aa
+  1-4-orchestrator-extraction: done       # spec-4-orchestrator-extraction.md baseline 0612148
+  1-5-plugin-system: done                 # spec-5-plugin-system.md       baseline 857222e
+  1-6-sanitize: done                      # spec-6-sanitize.md            baseline b963bcf
+  1-7-docs: done                          # spec-7-docs.md                baseline 8060aea
+  1-8-tea-bootstrap-atdd: done            # spec-tea-bootstrap-atdd-integration.md  impl: 10a828a / d05cc67
+  epic-1-retrospective: optional
+
+  # ─── Epic A: Review Classification & bmpipe Enhancements ───
+  epic-a: done
+  a-1-stop-after: done                    # spec-a1-stop-after.md                       impl: e613b2b
+  a-2-structured-review-findings: done    # spec-a2-structured-review-findings.md       impl: 1341645
+  a-3-classification-prompt: done         # spec-a3-classification-prompt.md            impl: c045438
+                                          #   (spec reconstructed 2026-04-26 from epic doc + commit diff)
+  a-4-safety-heuristic: done              # spec-a4-safety-heuristic-orchestrator-wiring.md  impl: dbd3669
+  epic-a-retrospective: optional
+
+  # ─── Epic B: Subagent Track Orchestrator ───
+  epic-b: in-progress
+  b-1-skill-rewrite: done                 # spec-b1-skill-rewrite.md                    impl: 57229e7 / 88c26d3
+  b-2-dependency-graph: done              # spec-b2-dependency-graph.md                 impl: e7e50ce
+  b-3-subagent-spawning: done             # spec-b3-subagent-spawning.md                impl: 67fdb07
+  b-4-decision-hub: done                  # spec-b4-decision-hub.md                     impl: 64b7882
+  b-5-completion-replanning: done         # spec-b5-completion-replanning.md            impl: eee481e (+e95dc36 patch)
+  b-6-per-story-branches: done            # spec-b6-per-story-branches.md               impl: 99b91de
+  b-7-prep-tasks: done                    # spec-b7-prep-tasks.md                       impl: 24c3fa1
+  b-8-cross-epic-preconditions: done      # spec-b8-cross-epic-preconditions.md         impl: b211323
+  b-9-direct-skill-invocation: ready-for-dev
+                                          # spec-b9-direct-skill-invocation.md (status=draft, untracked in git)
+                                          # Architecture decision confirmed 2026-04-23 party-mode:
+                                          #   subagents WIN over Agent Teams; B-9 is the path forward.
+                                          # See docs/party-mode-2026-04-23-subagent-vs-agent-teams-orchestrator-review.md
+  epic-b-retrospective: optional
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic 1 covers the original 7 stories + TEA bootstrap that lifted the embedded
+#   automation/ scripts into the standalone bmad-sdlc package. All shipped via the
+#   rename train (595b903) and the TEA integration commit (10a828a / d05cc67).
+# - Epic A added the 6-category review taxonomy, --stop-after, and structured JSON
+#   findings — bmpipe's "orchestrator-ready" surface for Epic B.
+# - Epic B is the subagent track orchestrator. 8/9 stories shipped; B-9 (direct
+#   skill invocation, replacing bmpipe CLI inside subagents) is specced but
+#   uncommitted, blocked on staging the spec + executing the workflow.md rewrite.
+# - The Agent Teams pivot proposed in docs/design-agent-teams-orchestrator.md was
+#   reviewed and REJECTED in the 2026-04-23 party-mode session (subagents won on
+#   token cost, stability, sequential-task fitness, and existing code). That doc
+#   should be archived or retitled; commit messages 8661731/e61735b describing it
+#   as "supersedes subagent approach" are inconsistent with the live decision.
