@@ -13,6 +13,8 @@ status: canonical-architecture
 
 # Test-Orchestrator — Architecture and Skill Basis
 
+> For the empirical evidence this skill produced, see [`test-orchestrator-results-2026-04-23.md`](./test-orchestrator-results-2026-04-23.md).
+
 Companion document to the test-orchestrator skill at `src/bmad_sdlc/claude_skills/test-orchestrator/`. Captures the design intent and constraints that the source files do not — read these together: source = *what* and *how*; this doc = *why*.
 
 ## Origin

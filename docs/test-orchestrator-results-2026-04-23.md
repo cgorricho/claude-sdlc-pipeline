@@ -11,6 +11,8 @@ relates-to:
 
 # Test-Orchestrator Results — Subagent Lifetime & SendMessage Validation
 
+> For the skill's design rationale and invariants, see [`test-orchestrator-architecture.md`](./test-orchestrator-architecture.md).
+
 ## Source
 
 This report extracts the empirical test data from **Rounds 8–10** of `docs/party-mode-2026-04-23-subagent-vs-agent-teams-orchestrator-review.md`. The original orchestrator session log was not preserved separately; the numbers below are the verbatim observations Carlos read out of the live session into the transcript at the time. All quoted output blocks are from the transcript record.
